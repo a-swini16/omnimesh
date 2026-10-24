@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import pc from 'picocolors';
-import { parseOmniMeshConfigYaml } from '@omnimesh/core';
+import { parseOmniMeshConfigYaml, isPlaceholderUrl } from '@omnimesh/core';
 import { getProvider } from '@omnimesh/providers';
 
 export interface DoctorOptions {
@@ -76,6 +76,11 @@ export async function runDoctor(options: DoctorOptions = {}) {
       const url = typeof rawNode === 'string' ? rawNode : rawNode.url;
       try {
         const parsed = new URL(url);
+        if (isPlaceholderUrl(url)) {
+          console.log(pc.red(`    ✖ ${url} is a placeholder. Replace it with your deployed app URL.`));
+          hasErrors = true;
+          continue;
+        }
         console.log(pc.dim(`    • ${parsed.hostname} (${parsed.protocol})`));
       } catch {
         console.log(pc.red(`    ✖ Invalid URL format: ${url}`));

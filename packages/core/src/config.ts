@@ -2,6 +2,20 @@ import { z } from 'zod';
 import * as YAML from 'yaml';
 import { ConfigValidationError } from './errors.js';
 
+/**
+ * Generated example URLs use the reserved `.invalid` TLD (RFC 2606): it never resolves, so nobody
+ * can own a placeholder host and receive the gateway secret before the developer fills in real URLs.
+ */
+export const PLACEHOLDER_HOST_SUFFIX = '.replace-me.invalid';
+
+export function isPlaceholderUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname.endsWith('.invalid');
+  } catch {
+    return false;
+  }
+}
+
 export const CandidateNodeSchema = z.union([
   z.string().url(),
   z.object({
@@ -17,7 +31,7 @@ export const CandidateNodeSchema = z.union([
 
 export const OmniMeshConfigSchema = z.object({
   profile: z.enum(['no-card', 'with-card', 'custom']).default('no-card'),
-  domain: z.string().min(1).default('api.yourdomain.com'),
+  domain: z.string().min(1).default('api.replace-me.invalid'),
   gatewaySecret: z
     .string()
     .min(32, 'Gateway secret must be at least 32 characters for fail-closed security')
@@ -47,14 +61,14 @@ export const OmniMeshConfigSchema = z.object({
   pools: z
     .record(z.string(), z.array(CandidateNodeSchema))
     .default({
-      '/auth': ['https://auth-service.deno.dev', 'https://auth-service.vercel.app'],
+      '/auth': ['https://auth-service.deno.dev.replace-me.invalid', 'https://auth-service.vercel.app.replace-me.invalid'],
       '/api': [
-        'https://core-api.koyeb.app',
-        'https://core-api.onrender.com',
-        'https://core-api.vercel.app',
+        'https://core-api.koyeb.app.replace-me.invalid',
+        'https://core-api.onrender.com.replace-me.invalid',
+        'https://core-api.vercel.app.replace-me.invalid',
       ],
-      '/heavy': ['https://core-api.koyeb.app', 'https://core-api.onrender.com'],
-      '/webhooks': ['https://webhooks.netlify.app', 'https://webhooks.vercel.app'],
+      '/heavy': ['https://core-api.koyeb.app.replace-me.invalid', 'https://core-api.onrender.com.replace-me.invalid'],
+      '/webhooks': ['https://webhooks.netlify.app.replace-me.invalid', 'https://webhooks.vercel.app.replace-me.invalid'],
     }),
   database: z
     .object({
@@ -141,7 +155,7 @@ export function generateDefaultConfig(profile: 'no-card' | 'with-card' = 'no-car
   if (profile === 'no-card') {
     return {
       profile: 'no-card',
-      domain: 'api.yourdomain.com',
+      domain: 'api.replace-me.invalid',
       router: {
         timeoutMs: 2500,
         maxAttempts: 3,
@@ -151,10 +165,10 @@ export function generateDefaultConfig(profile: 'no-card' | 'with-card' = 'no-car
         healthCheckIntervalSeconds: 60,
       },
       pools: {
-        '/auth': ['https://auth-service.deno.dev', 'https://auth-service.vercel.app', 'https://webhooks.netlify.app'],
-        '/api': ['https://core-api.koyeb.app', 'https://core-api.onrender.com', 'https://core-api.vercel.app'],
-        '/heavy': ['https://core-api.koyeb.app', 'https://core-api.onrender.com'],
-        '/webhooks': ['https://webhooks.netlify.app', 'https://webhooks.vercel.app'],
+        '/auth': ['https://auth-service.deno.dev.replace-me.invalid', 'https://auth-service.vercel.app.replace-me.invalid', 'https://webhooks.netlify.app.replace-me.invalid'],
+        '/api': ['https://core-api.koyeb.app.replace-me.invalid', 'https://core-api.onrender.com.replace-me.invalid', 'https://core-api.vercel.app.replace-me.invalid'],
+        '/heavy': ['https://core-api.koyeb.app.replace-me.invalid', 'https://core-api.onrender.com.replace-me.invalid'],
+        '/webhooks': ['https://webhooks.netlify.app.replace-me.invalid', 'https://webhooks.vercel.app.replace-me.invalid'],
       },
       database: {
         mode: 'managed',
@@ -171,7 +185,7 @@ export function generateDefaultConfig(profile: 'no-card' | 'with-card' = 'no-car
       keepAlive: {
         enabled: true,
         intervalMinutes: 14,
-        targets: ['https://core-api.onrender.com/health', 'https://core-api.koyeb.app/health'],
+        targets: ['https://core-api.onrender.com.replace-me.invalid/health', 'https://core-api.koyeb.app.replace-me.invalid/health'],
       },
       rateLimit: {
         enabled: true,
@@ -183,7 +197,7 @@ export function generateDefaultConfig(profile: 'no-card' | 'with-card' = 'no-car
   // with-card profile (Includes Oracle ARM VM, R2)
   return {
     profile: 'with-card',
-    domain: 'api.yourdomain.com',
+    domain: 'api.replace-me.invalid',
     router: {
       timeoutMs: 2500,
       maxAttempts: 3,
@@ -193,10 +207,10 @@ export function generateDefaultConfig(profile: 'no-card' | 'with-card' = 'no-car
       healthCheckIntervalSeconds: 60,
     },
     pools: {
-      '/auth': ['https://auth-service.deno.dev', 'https://auth-service.vercel.app', 'https://oracle-tunnel.yourdomain.com'],
-      '/api': ['https://oracle-tunnel.yourdomain.com', 'https://core-api.koyeb.app', 'https://core-api.onrender.com', 'https://core-api.vercel.app'],
-      '/heavy': ['https://oracle-tunnel.yourdomain.com', 'https://core-api.koyeb.app'],
-      '/webhooks': ['https://webhooks.netlify.app', 'https://oracle-tunnel.yourdomain.com'],
+      '/auth': ['https://auth-service.deno.dev.replace-me.invalid', 'https://auth-service.vercel.app.replace-me.invalid', 'https://oracle-tunnel.replace-me.invalid'],
+      '/api': ['https://oracle-tunnel.replace-me.invalid', 'https://core-api.koyeb.app.replace-me.invalid', 'https://core-api.onrender.com.replace-me.invalid', 'https://core-api.vercel.app.replace-me.invalid'],
+      '/heavy': ['https://oracle-tunnel.replace-me.invalid', 'https://core-api.koyeb.app.replace-me.invalid'],
+      '/webhooks': ['https://webhooks.netlify.app.replace-me.invalid', 'https://oracle-tunnel.replace-me.invalid'],
     },
     database: {
       mode: 'self-hosted',
@@ -214,7 +228,7 @@ export function generateDefaultConfig(profile: 'no-card' | 'with-card' = 'no-car
     keepAlive: {
       enabled: false,
       intervalMinutes: 14,
-      targets: ['https://core-api.onrender.com/health'],
+      targets: ['https://core-api.onrender.com.replace-me.invalid/health'],
     },
     rateLimit: {
       enabled: true,

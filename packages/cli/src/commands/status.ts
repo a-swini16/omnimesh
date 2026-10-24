@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import pc from 'picocolors';
-import { parseOmniMeshConfigYaml } from '@omnimesh/core';
+import { parseOmniMeshConfigYaml, isPlaceholderUrl } from '@omnimesh/core';
+import { readEnvFile } from '../env.js';
 import { getProvider } from '@omnimesh/providers';
 
 export interface StatusOptions {
@@ -24,6 +25,7 @@ export async function runStatus(options: StatusOptions = {}) {
   console.log(`Domain:  ${pc.bold(config.domain)} (Profile: ${pc.bold(config.profile)})`);
   console.log(`Router:  Timeout ${config.router.timeoutMs}ms | Max Attempts: ${config.router.maxAttempts} | Budget: ${config.router.totalBudgetMs}ms\n`);
 
+  const gatewaySecret = readEnvFile(cwd).GATEWAY_SECRET || config.gatewaySecret || '';
   console.log(pc.bold('Active Pools & Upstream Nodes:'));
 
   for (const [poolPath, nodes] of Object.entries(config.pools)) {
@@ -31,6 +33,10 @@ export async function runStatus(options: StatusOptions = {}) {
 
     for (const rawNode of nodes as any[]) {
       const url = typeof rawNode === 'string' ? rawNode : rawNode.url;
+      if (isPlaceholderUrl(url)) {
+        console.log(`    • ${pc.bold(url)} -> ${pc.yellow('PLACEHOLDER (replace with your deployed app URL)')}`);
+        continue;
+      }
       const t0 = Date.now();
       let statusStr = pc.yellow('CHECKING...');
       let latency = 0;
@@ -41,7 +47,7 @@ export async function runStatus(options: StatusOptions = {}) {
         const res = await fetch(`${url.replace(/\/$/, '')}/health`, {
           signal: controller.signal,
           headers: {
-            'X-Gateway-Secret': config.gatewaySecret || process.env.GATEWAY_SECRET || '',
+            'X-Gateway-Secret': gatewaySecret,
           },
         });
         clearTimeout(timeout);

@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import pc from 'picocolors';
-import { parseOmniMeshConfigYaml } from '@omnimesh/core';
+import { parseOmniMeshConfigYaml, isPlaceholderUrl } from '@omnimesh/core';
+import { readEnvFile, placeholderNodes } from '../env.js';
 import { getProvider } from '@omnimesh/providers';
 
 export interface DeployOptions {
@@ -29,15 +30,14 @@ export async function runDeploy(options: DeployOptions = {}) {
   const rawYaml = fs.readFileSync(configPath, 'utf-8');
   const config = parseOmniMeshConfigYaml(rawYaml);
 
-  // Load .env if present
-  const envPath = path.join(cwd, '.env');
-  const envConfig: Record<string, string> = { ...process.env as Record<string, string> };
-  if (fs.existsSync(envPath)) {
-    const lines = fs.readFileSync(envPath, 'utf-8').split('\n');
-    for (const line of lines) {
-      const match = line.match(/^\s*([\w_]+)\s*=\s*["']?(.*?)["']?\s*$/);
-      if (match) envConfig[match[1]] = match[2];
-    }
+  const envConfig = readEnvFile(cwd);
+
+  // Never contact placeholder hosts: the health check sends the gateway secret
+  const placeholders = placeholderNodes(config.pools, isPlaceholderUrl);
+  if (placeholders.length > 0) {
+    console.log(pc[options.dryRun ? 'yellow' : 'red'](`${options.dryRun ? '⚠' : '✖'} These pool URLs are still placeholders. Replace them with your deployed app URLs:`));
+    for (const p of placeholders) console.log(pc.dim(`   • ${p}`));
+    if (!options.dryRun) return false;
   }
 
   if (options.dryRun) {

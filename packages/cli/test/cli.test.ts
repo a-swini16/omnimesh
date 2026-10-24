@@ -56,9 +56,8 @@ describe('OmniMesh CLI Suite (init, doctor, deploy, chaos, add/remove)', () => {
     const netlify = nodes.find((n) => n.providerId === 'netlify');
     expect(netlify.requestsPerMonth).toBe(125000);
 
-    // Doctor checks passes on freshly initialized project
-    const doctorPassed = await runDoctor({ cwd: tmpDir });
-    expect(doctorPassed).toBe(true);
+    // Fresh projects still hold placeholder URLs, so doctor must ask for real ones
+    expect(await runDoctor({ cwd: tmpDir })).toBe(false);
   });
 
   it('adds and removes providers dynamically from config', async () => {

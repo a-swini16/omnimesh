@@ -28,7 +28,7 @@ export function createProgram() {
     .description('Interactive setup wizard to initialize OmniMesh in your repository')
     .option('--no-card', 'Initialize in strictly no-credit-card mode (Cloudflare, Koyeb, Render, Vercel, Netlify, Neon, Upstash)')
     .option('--with-card', 'Initialize including card-verified tiers (Oracle Always Free, Cloudflare R2)')
-    .option('--domain <domain>', 'Set custom frontend domain (default: api.yourdomain.com)')
+    .option('--domain <domain>', 'Set custom frontend domain (default: a placeholder you must replace)')
     .option('-q, --quick', 'Non-interactive fast setup using sensible defaults')
     .action(async (opts) => {
       let card: boolean | undefined = undefined;

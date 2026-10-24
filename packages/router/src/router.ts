@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { OmniMeshConfig } from '@omnimesh/core';
+import { isPlaceholderUrl, type OmniMeshConfig } from '@omnimesh/core';
 import { MemoryHealthStore, type HealthStore } from './health-store.js';
 import { MemoryQuotaTracker, type QuotaTracker } from './quota-tracker.js';
 import { prepareBufferedRequest, fetchWithTimeout, BodyTooLargeError } from './dispatcher.js';
@@ -112,6 +112,12 @@ export function createRouterApp(options: RouterOptions) {
         typeof n !== 'string' && (n.requestsPerDay || n.requestsPerMonth)
           ? { requestsPerDay: n.requestsPerDay, requestsPerMonth: n.requestsPerMonth }
           : undefined;
+      if (isPlaceholderUrl(url)) {
+        throw new Error(
+          `[OmniMesh] Pool ${prefix} still contains the placeholder URL ${url}. ` +
+          'Replace it with your deployed app URL in omnimesh.config.yaml (run `omnimesh doctor`).'
+        );
+      }
       const parsed = new URL(url);
       if (parsed.protocol !== 'https:' && !isLoopback(parsed.hostname)) {
         throw new Error(`[OmniMesh Security Violation] Upstream ${parsed.host} in pool ${prefix} must use https://`);

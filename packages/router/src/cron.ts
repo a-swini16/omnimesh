@@ -1,3 +1,5 @@
+import { isPlaceholderUrl } from '@omnimesh/core';
+
 export interface KeepAliveOptions {
   targets: string[];
   gatewaySecret?: string;
@@ -13,7 +15,8 @@ export async function runKeepAlive(options: KeepAliveOptions): Promise<Record<st
   const results: Record<string, boolean> = {};
 
   await Promise.allSettled(
-    targets.map(async (url) => {
+    // Never ping (or send the secret to) generated placeholder hosts
+    targets.filter((url) => !isPlaceholderUrl(url)).map(async (url) => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 

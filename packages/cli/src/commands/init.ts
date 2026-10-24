@@ -58,7 +58,7 @@ export async function runInit(options: InitOptions = {}) {
   console.log(pc.dim('“Your free tiers, merged into one resilient cloud.”\n'));
 
   let hasCard = Boolean(options.card);
-  let domain = options.domain || 'api.yourdomain.com';
+  let domain = options.domain || 'api.replace-me.invalid';
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -178,7 +178,8 @@ jobs:
       - name: Ping Standby Nodes
         run: |
           echo "Pinging OmniMesh warm standby nodes..."
-          curl -s -f -m 10 -H "X-Gateway-Secret: \${{ secrets.GATEWAY_SECRET }}" "https://\${{ vars.OMNIMESH_DOMAIN || '${domain}' }}/health" || true
+          # No gateway secret here: the router adds it when forwarding, and a typo'd domain must not receive it
+          curl -s -f -m 10 "https://\${{ vars.OMNIMESH_DOMAIN || '${domain}' }}/health" || true
 `;
 
   fs.writeFileSync(keepAliveWorkflowPath, keepAliveWorkflow, 'utf-8');

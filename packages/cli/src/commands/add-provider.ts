@@ -31,7 +31,8 @@ export async function runAddProvider(providerName: string, options: AddProviderO
   const rawYaml = fs.readFileSync(configPath, 'utf-8');
   const config = parseOmniMeshConfigYaml(rawYaml);
 
-  const defaultUrl = options.url || `https://${provider.id}-service.yourdomain.com`;
+  // Placeholder until the developer passes --url; `.invalid` never resolves, so no stranger can own it
+  const defaultUrl = options.url || `https://${provider.id}-service.replace-me.invalid`;
 
   // Add provider to /api pool
   const currentPool = (config.pools['/api'] || []) as any[];

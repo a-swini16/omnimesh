@@ -1,18 +1,18 @@
 # OmniMesh Audit Report
 
 Scope: lean (decision D4 in [AUDIT_PLAN.md](AUDIT_PLAN.md)). Source of truth: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-Status: **in progress.** All 6 High issues are fixed; 1 of 2 Critical is fixed (C-2 was found during H-5 work); load testing has not started.
+Status: **in progress.** All Critical and High issues are fixed; Medium/Low and load testing are next.
 
 | Severity | Found | Fixed | Open |
 |---|---|---|---|
-| Critical | 2 | 1 | 1 |
+| Critical | 2 | 2 | 0 |
 | High | 6 | 6 | 0 |
 | Medium | 9 | 0 | 9 |
 | Low | 4 | 0 | 4 |
 
-**Is this safe for real users yet? Not yet.** C-2 is open: right after `init`, `omnimesh status`/`deploy` send the gateway secret to placeholder hostnames owned by third parties. Also, none of the load and chaos scenarios have been run against a mock mesh yet. Fixes from the two earlier hardening commits (`4b741e8`, `15fd726`) are listed at the end.
+**Is this safe for real users yet? Not yet.** Every known Critical and High issue is fixed and tested, but none of the load and chaos scenarios (§6) have been run against a mock mesh, 9 Medium issues are open, and no independent re-audit has happened. Fixes from the two earlier hardening commits (`4b741e8`, `15fd726`) are listed at the end.
 
-Tests: 55/55 pass; strict typecheck clean.
+Tests: 59/59 pass; strict typecheck clean.
 
 ---
 
@@ -28,8 +28,10 @@ Status: FIXED in `d28ebdb`
 Area: CLI | Files: `packages/core/src/config.ts` (`generateDefaultConfig` pools), `packages/cli/src/commands/status.ts`, `packages/cli/src/commands/deploy.ts`
 What happens: `init` writes example pool URLs such as `https://core-api.koyeb.app` and `https://webhooks.netlify.app`. Those names can belong to anyone. `omnimesh status` and `omnimesh deploy` then send `X-Gateway-Secret` to every pool URL, so running them before editing the pools gives the secret to whoever owns those apps.
 How to reproduce: `omnimesh init --no-card --quick`, then `omnimesh status` (not run during the audit, to avoid sending a secret to a third party).
-Fix (proposed): mark generated URLs as placeholders (e.g. `https://REPLACE-ME.koyeb.app`, an unregistrable name), and have the CLI and router refuse to contact a placeholder; `doctor` reports which pools still need real URLs.
-Status: OPEN
+The same leak existed in three more places: the default domain `api.yourdomain.com` (a real, registered domain) used by the generated keep-alive workflow, which sent `X-Gateway-Secret`; `add-provider`'s default `*.yourdomain.com` URL; and the default keep-alive targets.
+Fix: every generated host now ends in `.replace-me.invalid`. The reserved `.invalid` TLD (RFC 2606) never resolves, so nobody can own it. `isPlaceholderUrl()` in core is enforced everywhere: the router refuses to start, `deploy` stops with a list of URLs to replace (exit code 1), `status` skips them, keep-alive never pings them, and `doctor` fails on each one. The keep-alive workflow no longer sends the secret at all (the router adds it when forwarding). `status` now reads `GATEWAY_SECRET` from `.env`; before, it sent an empty secret, so every node showed 403.
+Test: `packages/cli/test/placeholder-secret.test.ts` (all 4 failed before the fix; fetch is mocked, so no request leaves the machine).
+Status: FIXED in the commit below
 
 ### [H-1] Reused Idempotency-Key with a different body was silently replayed — HIGH
 Area: node middleware | File: `packages/node/src/idempotency.ts`
