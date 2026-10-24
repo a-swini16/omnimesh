@@ -31,7 +31,7 @@ How to reproduce: `omnimesh init --no-card --quick`, then `omnimesh status` (not
 The same leak existed in three more places: the default domain `api.yourdomain.com` (a real, registered domain) used by the generated keep-alive workflow, which sent `X-Gateway-Secret`; `add-provider`'s default `*.yourdomain.com` URL; and the default keep-alive targets.
 Fix: every generated host now ends in `.replace-me.invalid`. The reserved `.invalid` TLD (RFC 2606) never resolves, so nobody can own it. `isPlaceholderUrl()` in core is enforced everywhere: the router refuses to start, `deploy` stops with a list of URLs to replace (exit code 1), `status` skips them, keep-alive never pings them, and `doctor` fails on each one. The keep-alive workflow no longer sends the secret at all (the router adds it when forwarding). `status` now reads `GATEWAY_SECRET` from `.env`; before, it sent an empty secret, so every node showed 403.
 Test: `packages/cli/test/placeholder-secret.test.ts` (all 4 failed before the fix; fetch is mocked, so no request leaves the machine).
-Status: FIXED in the commit below
+Status: FIXED in `3927b62`
 
 ### [H-1] Reused Idempotency-Key with a different body was silently replayed — HIGH
 Area: node middleware | File: `packages/node/src/idempotency.ts`
