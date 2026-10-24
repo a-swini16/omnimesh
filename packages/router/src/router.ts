@@ -50,10 +50,19 @@ function withTelemetry(
   node: Candidate,
   attempts: number,
   latencyMs: number,
-  credentials: string[] = []
+  credentials: string[] = [],
+  publicUrl?: (internal: string) => string | null
 ): Response {
   const headers = new Headers(response.headers);
   headers.delete('x-gateway-secret');
+  // Redirects built from a node's own address would reveal the raw backend URL (and bypass the router)
+  if (publicUrl) {
+    for (const h of ['location', 'content-location']) {
+      const value = headers.get(h);
+      const rewritten = value ? publicUrl(value) : null;
+      if (rewritten) headers.set(h, rewritten);
+    }
+  }
   if (credentials.length > 0) {
     // A response to a logged-in user must never be stored by a shared cache (CDN, proxy) and served
     // to someone else, even if the app forgot cache headers or said "public"
@@ -163,6 +172,18 @@ export function createRouterApp(options: RouterOptions) {
     });
   }
   const prefixes = Object.keys(pools);
+  const internalOrigins = new Set(Object.values(pools).flat().map((n) => new URL(n.url).origin));
+  /** Map an absolute URL on any mesh node onto the public origin; null when it is not internal. */
+  const toPublic = (publicOrigin: string) => (value: string): string | null => {
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return null; // relative redirects are already safe
+    try {
+      const target = new URL(value);
+      if (!internalOrigins.has(target.origin)) return null;
+      return `${publicOrigin}${target.pathname}${target.search}${target.hash}`;
+    } catch {
+      return null;
+    }
+  };
 
   const app = new Hono();
 
@@ -297,7 +318,7 @@ export function createRouterApp(options: RouterOptions) {
 
           if (!isHardFailure && !READ_METHODS.has(bufferedReq.method)) {
             // An app error on a write is final: pass it through unchanged instead of replaying it on more nodes
-            return withTelemetry(response, node, attempts, Date.now() - startTime, credentials);
+            return withTelemetry(response, node, attempts, Date.now() - startTime, credentials, toPublic(url.origin));
           }
 
           // Release the connection; we are not going to read this body
@@ -325,7 +346,7 @@ export function createRouterApp(options: RouterOptions) {
         await healthStore.markNodeHealthy(node.url, latency);
         if (node.quota) await quotaTracker.recordRequest(node.quotaKey);
 
-        return withTelemetry(response, node, attempts, latency, credentials);
+        return withTelemetry(response, node, attempts, latency, credentials, toPublic(url.origin));
       } catch (err: any) {
         // Network timeout, connection refused, or DNS failure
         const isTimeout = err.name === 'AbortError' || err.name === 'TimeoutError' || err.message?.includes('aborted');

@@ -65,6 +65,9 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
     app3.use('*', gatewayAuth({ secret: TEST_SECRET }));
     app3.get('/health', healthHandler({ providerId: 'vercel-burst' }));
     app3.get('/api/me', (c) => c.json({ user: c.req.header('authorization') }));
+    // Apps often build absolute redirects from their own (internal) URL
+    app3.get('/api/redirect', (c) => c.redirect(new URL('/api/data?x=1', c.req.url).toString(), 302));
+    app3.get('/api/oauth', (c) => c.redirect('https://accounts.example.org/login?next=/api/me', 302));
     app3.get('/api/public', (c) => c.json({ ok: true }, 200, { 'Cache-Control': 'public, max-age=60' }));
     app3.get('/api/data', (c) => {
       return c.json({ source: 'node3-tertiary', message: 'Hello from Node 3' });
@@ -343,6 +346,16 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
       storage: { provider: 'supabase' },
       keepAlive: { enabled: false, intervalMinutes: 14, targets: [] },
       rateLimit: { enabled: false, requestsPerMinute: 120 },
+    });
+
+    it('[M-1] rewrites redirects to a node\'s own URL onto the public domain', async () => {
+      const router = createRouterApp({ config: baseConfig(), gatewaySecret: TEST_SECRET });
+      const res = await router.request('https://api.mesh.local/api/redirect');
+      expect(res.status).toBe(302);
+      expect(res.headers.get('Location')).toBe('https://api.mesh.local/api/data?x=1');
+
+      const external = await router.request('https://api.mesh.local/api/oauth');
+      expect(external.headers.get('Location')).toBe('https://accounts.example.org/login?next=/api/me');
     });
 
     it('[M-9] marks responses to authenticated requests as private so no CDN shares them', async () => {
