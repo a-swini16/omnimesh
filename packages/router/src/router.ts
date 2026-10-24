@@ -67,6 +67,11 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 /** A path belongs to a pool only on a segment boundary: /api and /api/x match /api, /apiary does not. */
 export function matchPool(pathname: string, prefixes: string[]): string | undefined {
   return prefixes
@@ -152,10 +157,16 @@ export function createRouterApp(options: RouterOptions) {
 
     // 0. Per-client rate limit, so one bot cannot burn the whole free-tier quota
     if (config.rateLimit.enabled) {
-      const { allowed, retryAfterSeconds } = await rateLimiter.hit(clientIp);
-      if (!allowed) {
-        c.header('Retry-After', String(retryAfterSeconds));
-        return c.json({ error: 'Too Many Requests', code: 'ERR_RATE_LIMITED' }, 429);
+      // Limit per IP, and per caller so one token used from many IPs is still one client.
+      // Callers are keyed by a hash so raw tokens never reach the limiter's storage.
+      const auth = request.headers.get('authorization');
+      const keys = [`ip:${clientIp}`, ...(auth ? [`user:${await sha256Hex(auth)}`] : [])];
+      for (const key of keys) {
+        const { allowed, retryAfterSeconds } = await rateLimiter.hit(key);
+        if (!allowed) {
+          c.header('Retry-After', String(retryAfterSeconds));
+          return c.json({ error: 'Too Many Requests', code: 'ERR_RATE_LIMITED' }, 429);
+        }
       }
     }
 

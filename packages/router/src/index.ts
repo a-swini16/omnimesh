@@ -14,6 +14,7 @@ export * from './rate-limiter.js';
 // One router per isolate: rebuilding it per request would reset the in-memory circuit breaker
 // and re-parse the config inside the 10ms CPU budget
 let cached: { key: string; app: ReturnType<typeof createRouterApp> } | null = null;
+let warnedNoSharedLimiter = false;
 
 /**
  * Cloudflare Worker Default Export
@@ -32,6 +33,13 @@ export default {
     const key = `${env.OMNIMESH_CONFIG_YAML}\n${env.GATEWAY_SECRET}`;
     if (!cached || cached.key !== key) {
       const config = parseOmniMeshConfigYaml(env.OMNIMESH_CONFIG_YAML);
+      if (config.rateLimit.enabled && !env.RATE_LIMITER && !warnedNoSharedLimiter) {
+        warnedNoSharedLimiter = true;
+        console.warn(
+          '[OmniMesh] rateLimit is enabled but the RATE_LIMITER binding is missing, so limits are counted ' +
+          'per isolate and a distributed bot gets far more requests. Add it from packages/router/wrangler.toml.example.'
+        );
+      }
       cached = {
         key,
         app: createRouterApp({

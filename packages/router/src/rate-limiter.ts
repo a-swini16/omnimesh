@@ -43,7 +43,11 @@ export class MemoryRateLimiter implements RateLimiter {
   }
 }
 
-/** Adapter for the Cloudflare Workers rate limiting binding (`[[unsafe.bindings]] type = "ratelimit"`). */
+/**
+ * Adapter for the Cloudflare Workers rate limiting binding (`[[ratelimits]]` in wrangler.toml).
+ * Counters are shared by every isolate in a Cloudflare location and cost no KV/Upstash quota,
+ * so this is the default shared limiter for free-tier meshes.
+ */
 export class CloudflareRateLimiter implements RateLimiter {
   constructor(private binding: { limit(opts: { key: string }): Promise<{ success: boolean }> }) {}
 

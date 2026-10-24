@@ -1,0 +1,23 @@
+# Copy to wrangler.toml, then: npx wrangler deploy
+# Check current syntax and limits: https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/
+name = "omnimesh-router"
+main = "src/index.ts"
+compatibility_date = "2025-06-01"
+
+# Shared health store (circuit breaker state seen by every isolate)
+[[kv_namespaces]]
+binding = "OMNIMESH_KV"
+id = "<your-kv-namespace-id>"
+
+# Shared rate limiter used per client IP and per caller. Keep limit in line with rateLimit.requestsPerMinute.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 120, period = 60 }
+
+# Health checks / keep-alive (keep-alive is off unless KEEP_ALIVE_TARGETS is set)
+[triggers]
+crons = ["* * * * *"]
+
+# Set secrets with `npx wrangler secret put <NAME>`, never in this file:
+#   GATEWAY_SECRET, OMNIMESH_STATUS_TOKEN, OMNIMESH_CONFIG_YAML
