@@ -356,6 +356,19 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
       expect(JSON.stringify([...res.headers])).not.toContain('127.0.0.1');
     });
 
+    it('[H-6] rejects bodies over maxBodyBytes with 413 even when they would be streamed', async () => {
+      const cfg = baseConfig();
+      cfg.router.maxBodyBytes = 4096; // maxBufferBytes is 1024, so 2-4 KB bodies are streamed
+      const router = createRouterApp({ config: cfg, gatewaySecret: TEST_SECRET });
+      const send = (size: number) =>
+        router.request('/api/orders', { method: 'POST', body: new Uint8Array(size), headers: { 'Content-Length': String(size) } });
+
+      const tooBig = await send(8192);
+      expect(tooBig.status).toBe(413);
+      expect(((await tooBig.json()) as any).code).toBe('ERR_BODY_TOO_LARGE');
+      expect((await send(2048)).status).toBe(201); // within the cap: streamed to the node as before
+    });
+
     it('rejects oversized chunked bodies with 413 instead of buffering them', async () => {
       const router = createRouterApp({ config: baseConfig(), gatewaySecret: TEST_SECRET });
       const big = new ReadableStream({ start(c) { c.enqueue(new Uint8Array(4096)); c.close(); } });

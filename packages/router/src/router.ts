@@ -186,7 +186,7 @@ export function createRouterApp(options: RouterOptions) {
     // 2. Prepare buffered request (buffer body if <= maxBufferBytes)
     let bufferedReq;
     try {
-      bufferedReq = await prepareBufferedRequest(request, config.router.maxBufferBytes);
+      bufferedReq = await prepareBufferedRequest(request, config.router.maxBufferBytes, config.router.maxBodyBytes);
     } catch (err) {
       if (err instanceof BodyTooLargeError) {
         return c.json({ error: 'Request body too large.', code: 'ERR_BODY_TOO_LARGE' }, 413);

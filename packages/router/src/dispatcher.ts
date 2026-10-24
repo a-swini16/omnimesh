@@ -15,9 +15,12 @@ const IDEMPOTENT_METHODS = new Set(['GET', 'HEAD', 'PUT', 'DELETE', 'OPTIONS']);
  * Payloads <= maxBufferBytes are buffered for safe failover retry.
  * Larger payloads are streamed directly without retry capability.
  */
+export const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024;
+
 export async function prepareBufferedRequest(
   request: Request,
-  maxBufferBytes = 1048576
+  maxBufferBytes = 1048576,
+  maxBodyBytes = DEFAULT_MAX_BODY_BYTES
 ): Promise<BufferedRequest> {
   const url = new URL(request.url);
   const method = request.method.toUpperCase();
@@ -41,6 +44,11 @@ export async function prepareBufferedRequest(
 
   const contentLengthHeader = headers.get('content-length');
   const contentLength = contentLengthHeader ? parseInt(contentLengthHeader, 10) : null;
+
+  // Nothing above the hard cap reaches a node: free tiers pay for that bandwidth and memory
+  if (contentLength !== null && contentLength > maxBodyBytes) {
+    throw new BodyTooLargeError(maxBodyBytes);
+  }
 
   // If payload exceeds buffer limit, stream directly without buffering
   if (contentLength !== null && contentLength > maxBufferBytes) {

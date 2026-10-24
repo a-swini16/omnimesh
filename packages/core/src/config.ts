@@ -43,6 +43,8 @@ export const OmniMeshConfigSchema = z.object({
       totalBudgetMs: z.number().int().positive().default(6000),
       circuitTtlMs: z.number().int().positive().default(30000),
       maxBufferBytes: z.number().int().positive().default(1048576), // 1MB safe payload buffer
+      // Hard cap on any request body, streamed or buffered (default 10 MB); larger bodies get 413
+      maxBodyBytes: z.number().int().positive().optional(),
       healthCheckIntervalSeconds: z.number().int().positive().default(60),
       // priority: config order (failover only). weighted: spread load across healthy non-backup nodes by weight.
       strategy: z.enum(['priority', 'weighted']).optional(),
