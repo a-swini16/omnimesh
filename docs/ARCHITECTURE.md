@@ -2,6 +2,8 @@
 
 > Text extracted automatically from `OmniMesh — System Architecture v2.pdf` (Oct 24, 2026). That PDF is the source of truth. Diagrams were images in the PDF and are not included here; see the PDF.
 
+> **Audit errata (owner-approved, see `AUDIT_REPORT.md` H-8):** §2–3 assume a Cloudflare cache in front of the Worker, so cached reads would not invoke it. On Cloudflare, Workers run *before* the cache and cache hits still count as Worker requests. With one Worker route, the real free ceiling is **100,000 requests/day for all traffic, cached or not**.
+
 ```text
 
   OmniMesh — System Architecture v2

@@ -100,7 +100,7 @@ Demonstrating sub-3-second cross-cloud failover in real-time...
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │  LAYER 1: CDN Edge Shield & Cache (Cloudflare Free Tier)               │
-│  • Public GETs cached at RAM edge (absorbs 85-90% read traffic)        │
+│  • Every request runs the Worker: 100k/day ceiling on the free plan    │
 │  • DDoS mitigation, SSL termination, and IP rate limiting              │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │ Uncached dynamic & write traffic
@@ -203,7 +203,9 @@ Repos that overclaim get torn apart. Here is what OmniMesh can and cannot do:
    * **Mode B (Oracle Users):** Self-hosted Postgres on Oracle ARM with real-time logical replication to Neon. Failover to Neon is read-only until an operator runs `omnimesh db promote`.
 3. **WebSockets do not fail over mid-stream:**
    If a server hosting an active WebSocket connection dies, the client reconnects and lands on the next healthy node.
-4. **Sleeping Containers (Render):**
+4. **The free ceiling is 100,000 requests per day (about 3M per month):**
+   Every request to your domain runs the Cloudflare Worker router, and cache hits still count, because [Workers run before the cache](https://developers.cloudflare.com/workers/platform/pricing/). The Workers Free plan allows 100,000 requests/day, resetting at midnight UTC; after that Cloudflare answers with error 1027 until the reset. Adding more compute providers (or Oracle) adds CPU and RAM, not more requests. To go beyond it, move to a paid Workers plan; the code does not change.
+5. **Sleeping Containers (Render):**
    Render free tier spins down after 15m of inactivity, taking 30–50s to wake up. OmniMesh handles this by:
    * Placing Render as a warm backup rather than primary hot node.
    * Generating an automated GitHub Actions keep-alive workflow (`.github/workflows/keep-alive.yml`) that pings `/health` every 14 minutes.
