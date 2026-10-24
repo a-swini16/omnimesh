@@ -1,18 +1,18 @@
 # OmniMesh Audit Report
 
 Scope: lean (decision D4 in [AUDIT_PLAN.md](AUDIT_PLAN.md)). Source of truth: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-Status: **in progress.** Every known Critical and High issue is fixed, and all 6 lean load scenarios pass except the cross-user cache headers (M-9, Medium). Medium/Low issues and the independent re-audit are next.
+Status: **in progress.** Every known Critical, High and Medium issue is fixed with a test, and all 6 lean load scenarios pass. 4 Low issues and the independent re-audit are next.
 
 | Severity | Found | Fixed | Open |
 |---|---|---|---|
 | Critical | 2 | 2 | 0 |
 | High | 9 | 9 | 0 |
-| Medium | 9 | 0 | 9 |
+| Medium | 9 | 9 | 0 |
 | Low | 4 | 0 | 4 |
 
-**Is this safe for real users yet? Not yet, but close on the request path.** Every known Critical and High issue is fixed with a test. Under load, failover, idempotency (0 duplicate orders across 500 buyers), quota switching, clean outages and bad-input handling all hold. Before launch: 9 Medium issues are open, including private responses not marked uncacheable (M-9), missing gateway-secret rotation (M-2) and backend URLs leaking through redirects (M-1). 9 of the 15 load scenarios (including the 30-minute soak) have not run, and no independent re-audit has happened.
+**Is this safe for real users yet? Not yet, but the request path is in good shape.** Every known Critical, High and Medium issue is fixed with a test that failed before its fix, and all 6 lean load scenarios pass: 0 duplicate orders across 500 buyers, failover costing only the in-flight requests, clean outages within budget, quota switching with 0 errors, bad input rejected cleanly, and 0 cacheable private responses. Before launch: 9 of the 15 load scenarios have not run (including the 30-minute soak, database-down and Redis-down), an independent re-audit hasn't happened, 4 Low issues are open, and the npm package name is unpublished (D5).
 
-Tests: 62/62 pass; strict typecheck clean.
+Tests: 85/85 pass; strict typecheck clean.
 
 ---
 
@@ -94,7 +94,7 @@ Status: FIXED in `4969e87`
 
 ## Load-test results (local mock mesh)
 
-Scenarios 3, 4, 7 and 8 ran before H-6/H-7; those fixes only change body-size and app-`5xx` handling, which those scenarios do not exercise.
+All 6 scenarios were rerun after the Medium fixes (half-open circuit, default pool, redirect and cache-header rewriting all changed the router): every one still passes with the same numbers (flash sale 500/500 orders and 0 duplicates; primary dies 251 slow requests; all down max 6.01 s; quota 975/0/2,025 with 0 errors).
 
 Harness: `benchmarks/mock-mesh/` contains 5 mock providers (shared idempotency store and orders table standing in for Upstash/Postgres) and the real router on the Node adapter. k6 runs from Docker image `grafana/k6:1.0.0`. Run any scenario with `benchmarks/mock-mesh/run.sh <name>`. All numbers are from one Linux machine; they measure router *behavior*, not Cloudflare edge latency.
 
@@ -105,7 +105,7 @@ Harness: `benchmarks/mock-mesh/` contains 5 mock providers (shared idempotency s
 | 7 | **All nodes down** (hang), then recovery | ✅ PASS | 100% clean `503 ERR_FAILOVER_EXHAUSTED`; max 6.01 s (budget 6 s); after recovery 500/500 succeeded at once |
 | 8 | **Quota + 429:** koyeb 1,000/day quota, render answers 429 | ✅ PASS | 3,000/3,000 succeeded, 0 client errors; koyeb served 976 (target 950, small overshoot from 50 concurrent requests), render 0, vercel 2,024; ~1,400 req/s |
 | 11 | **Bad input:** oversized body, malformed JSON, buggy endpoint, then reads | ✅ PASS (after H-6/H-7) | 11 MB body → `413`; malformed JSON → `400` on the first attempt; 30 app `500`s opened no circuit; the primary then served 100/100 reads on its first try. *Before the fixes: the body was not rejected and 10 requests opened every node's circuit.* |
-| 13 | **Cross-user cache:** users A and B read `/api/me` concurrently, 50 VUs | ⚠️ PARTIAL | **0 of 48,605 responses had the other user's data**; but 100% lacked `Cache-Control: private`/`no-store` and `Vary: Authorization` (→ M-9 confirmed); ~3,200 req/s |
+| 13 | **Cross-user cache:** users A and B read `/api/me` concurrently, 50 VUs | ✅ PASS (after M-9) | 0 of 44,725 responses had the other user's data, and 0 were cacheable by a shared cache (all `private, no-store` + `Vary: Authorization`); ~3,000 req/s. *Before M-9: 100% lacked those headers.* |
 
 Not run (outside the lean scope): scenarios 1, 2, 5, 6, 9, 10, 12, 14, 15; slowloris (handled by Cloudflare's edge in production; the local Node adapter would not be representative); router CPU time per request (needs Miniflare).
 
@@ -113,9 +113,27 @@ Not run (outside the lean scope): scenarios 1, 2, 5, 6, 9, 10, 12, 14, 15; slowl
 
 **Realistic free capacity (no-card mode):** limited by the router, not by compute. Cloudflare Workers Free allows 100,000 requests/day, about 3M/month, resetting at midnight UTC, and per H-8 that includes cached reads. Adding Oracle or more providers raises compute capacity but not this ceiling. Beyond it, you need a paid Workers plan (same code) or option (a) under H-8.
 
-## Medium and Low (open)
+## Medium (all fixed)
 
-M-1 `Location` header leaks backend URLs · M-2 no gateway-secret rotation · M-3 unmatched paths fall through to `/api` · M-4 JWT has no `iss`/`aud` and `exp` is optional · M-5 no single-probe half-open circuit · M-6 config accepts empty pools and duplicate prefixes · M-7 `init` overwrites files and keep-alive is on by default · M-8 unpinned `cloudflared:latest` · M-9 confirmed by load test: private responses are not marked `private`/`Vary` (no data mixing at the router) · L-1 k6 fallback secret · L-2 no root `.env.example` · L-3 `any` casts in request paths · L-4 unreproduced README benchmark numbers. Details in [AUDIT_PLAN.md §4](AUDIT_PLAN.md).
+Each has a test that failed before its fix; one commit per issue.
+
+| ID | Issue | Fix | Test | Commit |
+|---|---|---|---|---|
+| M-9 | Responses to authenticated requests had no `Cache-Control`/`Vary`, so a CDN or proxy cache could serve user A's data to user B | Router forces `private, no-store` on any response to a request with `Authorization` or `Cookie` (unless the app already set private), and adds them to `Vary` | `failover.test.ts` › `[M-9]`; load scenario 13 | `6243b1c` |
+| M-2 | No way to rotate `GATEWAY_SECRET` without downtime | Nodes accept `previousSecrets` / `GATEWAY_SECRET_PREVIOUS` (each ≥ 32 chars, constant-time); `SECURITY.md` documents the 4-step rotation | `middleware.test.ts` › `[M-2]` (3 tests) | `efb7dd9` |
+| M-1 | Absolute `Location`/`Content-Location` built from a node's own URL leaked backend hosts | Any URL on any mesh node is rewritten onto the public origin; relative and external redirects untouched | `failover.test.ts` › `[M-1]` | `09bddb0` |
+| M-3 | Unmatched paths (e.g. `/admin`) always went to `/api`; `/_omnimesh/*` paths reached nodes | `defaultPool` (default `/api` as in the architecture; `null` → 404); router namespace never proxied. Verified `/api/../admin`, `%2e%2e`, `/API`, `/apiX` | `failover.test.ts` › `[M-3]` (2 tests) | `1d7c4ee` |
+| M-4 | JWTs without `exp` valid forever; no `iss`/`aud`; no clock-skew allowance | `signJwt` defaults to 15 min and can set `iss`/`aud`; `verifyJwt`/`jwtAuth` require `exp`, allow 30 s skew (max 300), check `iss`/`aud` when configured | `middleware.test.ts` › `[M-4]` (3 tests) | `97c302c` |
+| M-5 | After the 30 s circuit TTL, all traffic rushed back to a possibly still-dead node | Half-open: one probe; success closes the circuit, failure re-opens it for a full TTL; an unreported probe frees the slot after 10 s | `half-open.test.ts` | `a7c0f44` |
+| M-6 | Empty pools, prefixes without `/`, `/api` vs `/api/`, duplicate nodes and a missing `defaultPool` were accepted; unknown providers not flagged | Schema rejects each with a clear path and message; `doctor` flags unknown `providerId` values. Duplicate YAML keys were already rejected by the parser (test kept as a guard) | `config.test.ts` › `[M-6]` (7 tests); `cli.test.ts` › `[M-6]` | `39ce893` |
+| M-7 | `init` overwrote an existing config; keep-alive was on by default (architecture §8 says off, because of provider terms) | `init` refuses without `--force`; keep-alive only with `--keep-alive`, and the workflow carries a terms-of-service warning | `cli.test.ts` › `[M-7]` (2 tests) | `1fb2719` |
+| M-8 | Oracle compose: `cloudflared:latest` floating tag; containers could escalate privileges | Pinned `cloudflared:2026.10.3` (verified multi-arch incl. arm64 for Oracle Ampere); `core-api` non-root, read-only root filesystem, all capabilities dropped; `no-new-privileges` on every service | `providers.test.ts` › `[M-8]` parses the compose file | `f9417cf` |
+
+Behavior changes to note: `signJwt` now adds a 15-minute `exp` by default, and `verifyJwt` rejects tokens without one. Tokens issued by older code without `exp` will stop working, which is the point.
+
+## Low (open)
+
+L-1 k6 script `benchmarks/k6/load-test.js` has a hardcoded fallback gateway secret · L-2 no root `.env.example` (and `GATEWAY_SECRET_PREVIOUS`/`OMNIMESH_STATUS_TOKEN` are only documented in the generated `.env` and `SECURITY.md`) · L-3 `any` casts in router/node request paths; `pnpm lint` is a no-op · L-4 README benchmark numbers and the "<2.5 s" badge predate the mock-mesh results.
 
 ## Fixed earlier on this branch (`4b741e8`, `15fd726`)
 
