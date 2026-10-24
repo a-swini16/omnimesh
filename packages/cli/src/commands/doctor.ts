@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import pc from 'picocolors';
 import { parseOmniMeshConfigYaml, isPlaceholderUrl } from '@omnimesh/core';
-import { getProvider } from '@omnimesh/providers';
+import { getProvider, getAllProviders } from '@omnimesh/providers';
 
 export interface DoctorOptions {
   cwd?: string;
@@ -82,6 +82,10 @@ export async function runDoctor(options: DoctorOptions = {}) {
           continue;
         }
         console.log(pc.dim(`    • ${parsed.hostname} (${parsed.protocol})`));
+        if (typeof rawNode !== 'string' && rawNode.providerId && !getProvider(rawNode.providerId)) {
+          console.log(pc.red(`    ✖ Unknown providerId '${rawNode.providerId}' (typo?). Known: ${getAllProviders().map((p) => p.id).join(', ')}`));
+          hasErrors = true;
+        }
       } catch {
         console.log(pc.red(`    ✖ Invalid URL format: ${url}`));
         hasErrors = true;

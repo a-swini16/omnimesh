@@ -54,4 +54,25 @@ database:
       });
     }).toThrow(ConfigValidationError);
   });
+
+  describe('[M-6] rejects configs that would misroute traffic', () => {
+    const bad: Record<string, unknown> = {
+      'no pools at all': { pools: {} },
+      'an empty pool': { pools: { '/api': [] } },
+      'a prefix without a leading slash': { pools: { api: ['https://a.example.com'] } },
+      'the same prefix twice (/api and /api/)': { pools: { '/api': ['https://a.example.com'], '/api/': ['https://b.example.com'] } },
+      'the same URL twice in one pool': { pools: { '/api': ['https://a.example.com', 'https://a.example.com/'] } },
+      'a defaultPool that does not exist': { defaultPool: '/web', pools: { '/api': ['https://a.example.com'] } },
+    };
+    for (const [name, input] of Object.entries(bad)) {
+      it(`rejects ${name}`, () => {
+        expect(() => validateOmniMeshConfig(input)).toThrow(ConfigValidationError);
+      });
+    }
+
+    it('reports duplicate YAML keys as a clear config error, not a stack trace', () => {
+      const yaml = 'pools:\n  /api:\n    - https://a.example.com\n  /api:\n    - https://b.example.com\n';
+      expect(() => parseOmniMeshConfigYaml(yaml)).toThrow(/unique|duplicate/i);
+    });
+  });
 });

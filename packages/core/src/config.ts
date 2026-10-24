@@ -123,6 +123,37 @@ export const OmniMeshConfigSchema = z.object({
       enabled: true,
       requestsPerMinute: 120,
     }),
+}).superRefine((cfg, ctx) => {
+  // Mistakes here silently send traffic to the wrong place, so reject them at load time
+  const prefixes = Object.keys(cfg.pools);
+  if (prefixes.length === 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['pools'], message: 'at least one pool is required' });
+  }
+  const seen = new Map<string, string>();
+  for (const prefix of prefixes) {
+    if (!prefix.startsWith('/')) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['pools', prefix], message: `prefix must start with "/" (e.g. "/${prefix}")` });
+    }
+    const normalized = prefix.length > 1 ? prefix.replace(/\/+$/, '') : prefix;
+    if (seen.has(normalized)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['pools', prefix], message: `duplicates pool "${seen.get(normalized)}"` });
+    }
+    seen.set(normalized, prefix);
+
+    const nodes = cfg.pools[prefix];
+    if (nodes.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['pools', prefix], message: 'pool has no nodes' });
+    }
+    const urls = new Set<string>();
+    for (const n of nodes) {
+      const url = (typeof n === 'string' ? n : n.url).replace(/\/+$/, '');
+      if (urls.has(url)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['pools', prefix], message: `node ${url} is listed twice` });
+      urls.add(url);
+    }
+  }
+  if (cfg.defaultPool && !cfg.pools[cfg.defaultPool]) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['defaultPool'], message: `"${cfg.defaultPool}" is not one of the pools` });
+  }
 });
 
 export type OmniMeshConfig = z.infer<typeof OmniMeshConfigSchema>;

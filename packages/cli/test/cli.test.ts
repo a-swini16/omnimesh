@@ -97,4 +97,13 @@ describe('OmniMesh CLI Suite (init, doctor, deploy, chaos, add/remove)', () => {
     expect(out.status).toBe(0);
     expect(out.stdout).toContain('init');
   });
+
+  it('[M-6] doctor rejects unknown provider ids', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'omnimesh.config.yaml'),
+      'pools:\n  /api:\n    - url: https://api.example.com\n      providerId: herokuu\n'
+    );
+    fs.writeFileSync(path.join(tmpDir, '.env'), `GATEWAY_SECRET="${'s'.repeat(64)}"\n`);
+    expect(await runDoctor({ cwd: tmpDir })).toBe(false);
+  });
 });
