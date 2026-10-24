@@ -39,10 +39,30 @@ const HARD_FAILURE_STATUSES = new Set([429, 502, 503, 504]);
 // Methods whose app-level 5xx may be retried on another node
 const READ_METHODS = new Set(['GET', 'HEAD']);
 
+/** Request credential headers that make a response user-specific. */
+function credentialHeaders(request: Request): string[] {
+  return ['Authorization', 'Cookie'].filter((h) => request.headers.has(h));
+}
+
 /** Copy the upstream response and attach OmniMesh telemetry (labels only, never upstream URLs). */
-function withTelemetry(response: Response, node: Candidate, attempts: number, latencyMs: number): Response {
+function withTelemetry(
+  response: Response,
+  node: Candidate,
+  attempts: number,
+  latencyMs: number,
+  credentials: string[] = []
+): Response {
   const headers = new Headers(response.headers);
   headers.delete('x-gateway-secret');
+  if (credentials.length > 0) {
+    // A response to a logged-in user must never be stored by a shared cache (CDN, proxy) and served
+    // to someone else, even if the app forgot cache headers or said "public"
+    const cc = (headers.get('cache-control') || '').toLowerCase();
+    if (!cc.includes('private') && !cc.includes('no-store')) headers.set('Cache-Control', 'private, no-store');
+    const vary = new Set((headers.get('vary') || '').split(',').map((v) => v.trim()).filter(Boolean));
+    for (const h of credentials) vary.add(h);
+    headers.set('Vary', [...vary].join(', '));
+  }
   headers.set('X-Omni-Node', node.label);
   headers.set('X-Omni-Attempts', String(attempts));
   headers.set('X-Omni-Latency-Ms', String(latencyMs));
@@ -169,6 +189,7 @@ export function createRouterApp(options: RouterOptions) {
     const url = new URL(request.url);
     const pathname = url.pathname;
     const clientIp = request.headers.get('cf-connecting-ip') || 'unknown';
+    const credentials = credentialHeaders(request);
 
     // 0. Per-client rate limit, so one bot cannot burn the whole free-tier quota
     if (config.rateLimit.enabled) {
@@ -276,7 +297,7 @@ export function createRouterApp(options: RouterOptions) {
 
           if (!isHardFailure && !READ_METHODS.has(bufferedReq.method)) {
             // An app error on a write is final: pass it through unchanged instead of replaying it on more nodes
-            return withTelemetry(response, node, attempts, Date.now() - startTime);
+            return withTelemetry(response, node, attempts, Date.now() - startTime, credentials);
           }
 
           // Release the connection; we are not going to read this body
@@ -304,7 +325,7 @@ export function createRouterApp(options: RouterOptions) {
         await healthStore.markNodeHealthy(node.url, latency);
         if (node.quota) await quotaTracker.recordRequest(node.quotaKey);
 
-        return withTelemetry(response, node, attempts, latency);
+        return withTelemetry(response, node, attempts, latency, credentials);
       } catch (err: any) {
         // Network timeout, connection refused, or DNS failure
         const isTimeout = err.name === 'AbortError' || err.name === 'TimeoutError' || err.message?.includes('aborted');

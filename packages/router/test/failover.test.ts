@@ -64,6 +64,8 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
     const app3 = new Hono();
     app3.use('*', gatewayAuth({ secret: TEST_SECRET }));
     app3.get('/health', healthHandler({ providerId: 'vercel-burst' }));
+    app3.get('/api/me', (c) => c.json({ user: c.req.header('authorization') }));
+    app3.get('/api/public', (c) => c.json({ ok: true }, 200, { 'Cache-Control': 'public, max-age=60' }));
     app3.get('/api/data', (c) => {
       return c.json({ source: 'node3-tertiary', message: 'Hello from Node 3' });
     });
@@ -341,6 +343,21 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
       storage: { provider: 'supabase' },
       keepAlive: { enabled: false, intervalMinutes: 14, targets: [] },
       rateLimit: { enabled: false, requestsPerMinute: 120 },
+    });
+
+    it('[M-9] marks responses to authenticated requests as private so no CDN shares them', async () => {
+      const router = createRouterApp({ config: baseConfig(), gatewaySecret: TEST_SECRET });
+      const me = await router.request('/api/me', { headers: { Authorization: 'Bearer alice' } });
+      expect(me.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(me.headers.get('Vary')?.toLowerCase()).toContain('authorization');
+
+      const viaCookie = await router.request('/api/me', { headers: { Cookie: 'session=abc' } });
+      expect(viaCookie.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(viaCookie.headers.get('Vary')?.toLowerCase()).toContain('cookie');
+
+      // Anonymous public responses keep the app's caching policy
+      const pub = await router.request('/api/public');
+      expect(pub.headers.get('Cache-Control')).toBe('public, max-age=60');
     });
 
     it('hides /_omnimesh/status unless the status token is presented', async () => {
