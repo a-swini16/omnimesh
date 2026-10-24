@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import YAML from 'yaml';
 import {
   getAllProviders,
   getNoCardProviders,
@@ -106,5 +109,23 @@ describe('OmniMesh Provider Adapter Registry & Verified Limits', () => {
       expect(result, `${provider.id}.deploy`).toBeInstanceOf(Error);
       expect((result as Error).message, provider.id).toMatch(/omnimesh deploy|wrangler|dashboard|Git|docker compose/i);
     }
+  });
+
+  it('[M-8] Oracle docker-compose: pinned images, no public ports, least privilege', () => {
+    const file = path.resolve(__dirname, '../src/oracle/docker-compose.yml');
+    const compose = YAML.parse(fs.readFileSync(file, 'utf-8'));
+    for (const [name, svc] of Object.entries<any>(compose.services)) {
+      if (svc.image) {
+        const tag = svc.image.split('/').pop().split(':')[1];
+        expect(tag, `${name} image tag`).toBeTruthy();
+        expect(tag, `${name} image tag`).not.toBe('latest');
+      }
+      expect(svc.ports, `${name} must not publish ports (Cloudflare Tunnel only)`).toBeUndefined();
+      expect(svc.security_opt, `${name} security_opt`).toContain('no-new-privileges:true');
+    }
+    const api = compose.services['core-api'];
+    expect(api.user, 'core-api must not run as root').toMatch(/^\$\{?[A-Z_:-]*\d+|^\d+/);
+    expect(api.read_only).toBe(true);
+    expect(api.cap_drop).toContain('ALL');
   });
 });
