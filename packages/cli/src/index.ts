@@ -41,7 +41,7 @@ export function createProgram() {
     .command('doctor')
     .description('Validate config, API tokens, gateway secret strength, and network reachability')
     .action(async () => {
-      await runDoctor();
+      if ((await runDoctor()) === false) process.exitCode = 1;
     });
 
   program
@@ -49,7 +49,7 @@ export function createProgram() {
     .description('Kill a node live to demonstrate sub-3-second cross-cloud failover')
     .option('-t, --timeout <ms>', 'Per-node timeout in milliseconds (default: 2500)', '2500')
     .action(async (opts) => {
-      await runChaos({ timeoutMs: parseInt(opts.timeout, 10) });
+      if ((await runChaos({ timeoutMs: parseInt(opts.timeout, 10) })) === false) process.exitCode = 1;
     });
 
   program
@@ -64,7 +64,7 @@ export function createProgram() {
     .description('Deploy backend code to all configured providers in parallel and router last')
     .option('--dry-run', 'Simulate deployment without triggering real API calls')
     .action(async (opts) => {
-      await runDeploy({ dryRun: opts.dryRun });
+      if ((await runDeploy({ dryRun: opts.dryRun })) === false) process.exitCode = 1;
     });
 
   program
@@ -72,14 +72,14 @@ export function createProgram() {
     .description('Add a provider to the current active mesh (e.g. oracle, render, vercel, koyeb)')
     .option('--url <url>', 'Custom service URL')
     .action(async (name, opts) => {
-      await runAddProvider(name, { url: opts.url });
+      if ((await runAddProvider(name, { url: opts.url })) === false) process.exitCode = 1;
     });
 
   program
     .command('remove-provider <name>')
     .description('Remove a provider from all active pools')
     .action(async (name) => {
-      await runRemoveProvider(name);
+      if ((await runRemoveProvider(name)) === false) process.exitCode = 1;
     });
 
   program
@@ -89,7 +89,7 @@ export function createProgram() {
     .description('Promote secondary Postgres replica (Neon) to primary writer (Mode B failover)')
     .option('-f, --force', 'Force promotion without interactive confirmation')
     .action(async (opts) => {
-      await runDbPromote({ force: opts.force });
+      if ((await runDbPromote({ force: opts.force })) === false) process.exitCode = 1;
     });
 
   return program;

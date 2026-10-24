@@ -2,6 +2,7 @@
   "name": "@omnimesh/node",
   "version": "1.0.0",
   "description": "Backend middleware for OmniMesh compute nodes (Express, Hono, Node HTTP)",
+  "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
   "types": "./src/index.ts",

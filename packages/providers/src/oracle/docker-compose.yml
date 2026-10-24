@@ -1,12 +1,10 @@
-version: '3.8'
-
 services:
   # Cloudflare Tunnel: Exposes core-api and postgres securely with ZERO open ingress firewall ports
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: omnimesh-cf-tunnel
     restart: always
-    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN:?CF_TUNNEL_TOKEN is required}
     networks:
       - mesh-net
 
@@ -18,14 +16,18 @@ services:
     environment:
       - PORT=3000
       - NODE_ENV=production
-      - GATEWAY_SECRET=${GATEWAY_SECRET}
-      - JWT_SECRET=${JWT_SECRET}
+      - GATEWAY_SECRET=${GATEWAY_SECRET:?GATEWAY_SECRET is required}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnimesh
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - OMNIMESH_PROVIDER=oracle
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    security_opt:
+      - no-new-privileges:true
     networks:
       - mesh-net
 
@@ -36,7 +38,7 @@ services:
     restart: always
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: omnimesh
     command: >
       postgres
@@ -44,6 +46,11 @@ services:
       -c max_replication_slots=5
       -c max_wal_senders=5
       -c shared_buffers=512MB
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d omnimesh']
+      interval: 10s
+      timeout: 5s
+      retries: 5
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
@@ -54,7 +61,7 @@ services:
     image: redis:7-alpine
     container_name: omnimesh-redis
     restart: always
-    command: redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required} --maxmemory 2gb --maxmemory-policy allkeys-lru
     networks:
       - mesh-net
 

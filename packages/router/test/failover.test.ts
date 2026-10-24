@@ -30,13 +30,14 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
     app1.get('/health', healthHandler({ providerId: 'koyeb-primary' }));
     app1.get('/api/data', (c) => {
       if (node1ShouldFail) {
-        return c.text('Primary node internal server error', 500);
+        return c.text('Primary node unavailable', 503);
       }
       return c.json({ source: 'node1-primary', message: 'Hello from Node 1' });
     });
+    app1.get('/api/buggy', (c) => c.text('bug in one endpoint', 500));
     app1.post('/api/orders', (c) => {
       if (node1ShouldFail) {
-        return c.text('Primary node crashed during order', 500);
+        return c.text('Primary node crashed during order', 503);
       }
       return c.json({ orderId: 'ord_1', node: 'node1' }, 201);
     });
@@ -127,7 +128,7 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
 
     const res = await router.request('/api/data');
     expect(res.status).toBe(200);
-    expect(res.headers.get('X-Omni-Node')).toBe(url1);
+    expect(res.headers.get('X-Omni-Node')).toBe('node-1');
     expect(res.headers.get('X-Omni-Attempts')).toBe('1');
 
     const json = await res.json() as any;
@@ -164,7 +165,7 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
     const res = await router.request('/api/data');
     expect(res.status).toBe(200);
     // Request succeeded on Node 2!
-    expect(res.headers.get('X-Omni-Node')).toBe(url2);
+    expect(res.headers.get('X-Omni-Node')).toBe('node-2');
     expect(res.headers.get('X-Omni-Attempts')).toBe('2');
 
     const json = await res.json() as any;
@@ -201,7 +202,7 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
     // Second request: Node 1 is already in circuit breaker deadNodes
     const res2 = await router.request('/api/data');
     expect(res2.status).toBe(200);
-    expect(res2.headers.get('X-Omni-Node')).toBe(url2);
+    expect(res2.headers.get('X-Omni-Node')).toBe('node-2');
     expect(res2.headers.get('X-Omni-Attempts')).toBe('1'); // Direct to Node 2 in 1 attempt!
   });
 
@@ -234,7 +235,7 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
 
     const res = await router.request('/api/data');
     expect(res.status).toBe(200);
-    expect(res.headers.get('X-Omni-Node')).toBe(url3);
+    expect(res.headers.get('X-Omni-Node')).toBe('node-3');
     expect(res.headers.get('X-Omni-Attempts')).toBe('3');
 
     const json = await res.json() as any;
@@ -317,7 +318,7 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
     });
 
     expect(res.status).toBe(201);
-    expect(res.headers.get('X-Omni-Node')).toBe(url2);
+    expect(res.headers.get('X-Omni-Node')).toBe('node-2');
     expect(res.headers.get('X-Omni-Attempts')).toBe('2');
   });
 
@@ -326,5 +327,129 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
     expect(directRes.status).toBe(403);
     const json = await directRes.json() as any;
     expect(json.code).toBe('ERR_GATEWAY_SECRET_INVALID');
+  });
+
+  describe('security hardening', () => {
+    const baseConfig = (): OmniMeshConfig => ({
+      profile: 'no-card',
+      domain: 'api.mesh.local',
+      router: { timeoutMs: 1500, maxAttempts: 3, totalBudgetMs: 4000, circuitTtlMs: 30000, maxBufferBytes: 1024, healthCheckIntervalSeconds: 60 },
+      pools: { '/api': [url3] },
+      database: { mode: 'managed', primary: 'neon', connectionUrlEnv: 'DATABASE_URL' },
+      cache: { provider: 'memory', urlEnv: 'REDIS_URL' },
+      storage: { provider: 'supabase' },
+      keepAlive: { enabled: false, intervalMinutes: 14, targets: [] },
+      rateLimit: { enabled: false, requestsPerMinute: 120 },
+    });
+
+    it('hides /_omnimesh/status unless the status token is presented', async () => {
+      const router = createRouterApp({ config: baseConfig(), gatewaySecret: TEST_SECRET, statusToken: 't'.repeat(32) });
+      expect((await router.request('/_omnimesh/status')).status).toBe(404);
+      const ok = await router.request('/_omnimesh/status', { headers: { Authorization: `Bearer ${'t'.repeat(32)}` } });
+      expect(ok.status).toBe(200);
+    });
+
+    it('never exposes upstream URLs in responses', async () => {
+      const router = createRouterApp({ config: baseConfig(), gatewaySecret: TEST_SECRET });
+      const res = await router.request('/api/data');
+      expect(res.headers.get('X-Omni-Node')).toBe('node-1');
+      expect(JSON.stringify([...res.headers])).not.toContain('127.0.0.1');
+    });
+
+    it('rejects oversized chunked bodies with 413 instead of buffering them', async () => {
+      const router = createRouterApp({ config: baseConfig(), gatewaySecret: TEST_SECRET });
+      const big = new ReadableStream({ start(c) { c.enqueue(new Uint8Array(4096)); c.close(); } });
+      const res = await router.request('/api/orders', { method: 'POST', body: big, duplex: 'half' } as any);
+      expect(res.status).toBe(413);
+    });
+
+    it('matches pools on path segments only (/apiary is not /api)', async () => {
+      const cfg = baseConfig();
+      cfg.pools = { '/api': [url3], '/auth': ['http://127.0.0.1:1'] };
+      const router = createRouterApp({ config: cfg, gatewaySecret: TEST_SECRET });
+      expect((await router.request('/authz/x')).headers.get('X-Omni-Node')).toBe('node-1');
+    });
+
+    it('refuses plain-http remote upstreams (gateway secret would travel unencrypted)', () => {
+      const cfg = baseConfig();
+      cfg.pools = { '/api': ['http://core-api.example.com'] };
+      expect(() => createRouterApp({ config: cfg, gatewaySecret: TEST_SECRET })).toThrow(/https/);
+    });
+
+    it('rate-limits a single client IP', async () => {
+      const cfg = baseConfig();
+      cfg.rateLimit = { enabled: true, requestsPerMinute: 2 };
+      const router = createRouterApp({ config: cfg, gatewaySecret: TEST_SECRET });
+      const h = { headers: { 'CF-Connecting-IP': '203.0.113.9' } };
+      await router.request('/api/data', h);
+      await router.request('/api/data', h);
+      const res = await router.request('/api/data', h);
+      expect(res.status).toBe(429);
+      expect(res.headers.get('Retry-After')).toBeTruthy();
+    });
+  });
+
+  describe('load balancing & circuit threshold', () => {
+    const cfg = (pool: any[], router: Partial<OmniMeshConfig['router']> = {}): OmniMeshConfig => ({
+      profile: 'no-card',
+      domain: 'api.mesh.local',
+      router: { timeoutMs: 1500, maxAttempts: 3, totalBudgetMs: 4000, circuitTtlMs: 30000, maxBufferBytes: 1048576, healthCheckIntervalSeconds: 60, ...router },
+      pools: { '/api': pool },
+      database: { mode: 'managed', primary: 'neon', connectionUrlEnv: 'DATABASE_URL' },
+      cache: { provider: 'memory', urlEnv: 'REDIS_URL' },
+      storage: { provider: 'supabase' },
+      keepAlive: { enabled: false, intervalMinutes: 14, targets: [] },
+      rateLimit: { enabled: false, requestsPerMinute: 120 },
+    });
+
+    it('weighted strategy spreads traffic across healthy nodes by weight', async () => {
+      node1ShouldFail = false;
+      node2ShouldFail = false;
+      const router = createRouterApp({
+        config: cfg([{ url: url1, weight: 1 }, { url: url2, weight: 1 }, { url: url3, weight: 8 }], { strategy: 'weighted' }),
+        gatewaySecret: TEST_SECRET,
+      });
+      const hits: Record<string, number> = {};
+      for (let i = 0; i < 200; i++) {
+        const node = (await router.request('/api/data')).headers.get('X-Omni-Node')!;
+        hits[node] = (hits[node] ?? 0) + 1;
+      }
+      expect(hits['node-3']).toBeGreaterThan(120); // ~80% expected
+      expect(hits['node-1']).toBeGreaterThan(0);
+      expect(hits['node-2']).toBeGreaterThan(0);
+    });
+
+    it('backup nodes only receive traffic when every primary is down', async () => {
+      const healthy = createRouterApp({
+        config: cfg([{ url: url3 }, { url: url1, isBackup: true }], { strategy: 'weighted' }),
+        gatewaySecret: TEST_SECRET,
+      });
+      for (let i = 0; i < 20; i++) {
+        expect((await healthy.request('/api/data')).headers.get('X-Omni-Node')).toBe('node-1');
+      }
+
+      // Port 1 refuses connections: a hard failure, so the backup takes over at once
+      const primaryDown = createRouterApp({
+        config: cfg([{ url: 'http://127.0.0.1:1' }, { url: url3, isBackup: true }], { strategy: 'weighted' }),
+        gatewaySecret: TEST_SECRET,
+      });
+      expect((await primaryDown.request('/api/data')).headers.get('X-Omni-Node')).toBe('node-2');
+    });
+
+    it('a single buggy endpoint (HTTP 500) does not open the circuit until the threshold', async () => {
+      node1ShouldFail = false;
+      const router = createRouterApp({ config: cfg([url1, url3], { failureThreshold: 3 }), gatewaySecret: TEST_SECRET });
+
+      await router.request('/api/buggy');
+      await router.request('/api/buggy');
+      // Two soft failures: node 1 still serves healthy routes
+      expect((await router.request('/api/data')).headers.get('X-Omni-Node')).toBe('node-1');
+
+      // A success reset the count, so three more consecutive failures are needed to trip it
+      for (let i = 0; i < 3; i++) await router.request('/api/buggy');
+      const res = await router.request('/api/data');
+      expect(res.headers.get('X-Omni-Node')).toBe('node-2');
+      expect(res.headers.get('X-Omni-Attempts')).toBe('1');
+    });
   });
 });

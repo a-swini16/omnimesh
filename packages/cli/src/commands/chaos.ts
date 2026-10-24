@@ -21,7 +21,7 @@ export async function runChaos(options: ChaosOptions = {}) {
   primaryApp.use('*', gatewayAuth({ secret: GATEWAY_SECRET }));
   primaryApp.get('/api/resource', (c) => {
     if (!primaryAlive) {
-      return c.text('CRITICAL FAILURE: Primary instance down', 500);
+      return c.text('CRITICAL FAILURE: Primary instance down', 503);
     }
     return c.json({ node: 'Primary (Oracle/Koyeb)', status: 'online' });
   });
@@ -98,6 +98,10 @@ export async function runChaos(options: ChaosOptions = {}) {
     const res2 = await router.request('/api/resource');
     const failoverElapsed = ((Date.now() - tFailoverStart) / 1000).toFixed(2);
     const json2 = await res2.json() as any;
+    if (res2.status !== 200) {
+      console.log(pc.bold(pc.red(`\n✖ Failover FAILED: client received ${res2.status} (${json2.code ?? 'unknown'})\n`)));
+      return false;
+    }
 
     console.log(
       `\n   ${pc.bold(pc.green('🚀 FAILOVER SUCCESSFUL!'))} Client received ${pc.bold(pc.green('200 OK'))}`
@@ -119,6 +123,7 @@ export async function runChaos(options: ChaosOptions = {}) {
     );
 
     console.log(pc.bold(pc.green('\n🎉 Chaos test passed! Your backend survived node failure without downtime.\n')));
+    return true;
   } finally {
     server1?.close();
     server2?.close();

@@ -2,6 +2,7 @@
   "name": "@omnimesh/router",
   "version": "1.0.0",
   "description": "High-performance edge router with sub-3s auto-failover, quota-awareness, and circuit breaking",
+  "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
   "types": "./src/index.ts",

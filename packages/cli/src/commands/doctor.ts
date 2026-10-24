@@ -40,7 +40,12 @@ export async function runDoctor(options: DoctorOptions = {}) {
     if (match) envSecret = match[1];
   }
 
-  const gatewaySecret = config.gatewaySecret || envSecret || process.env.GATEWAY_SECRET;
+  if (config.gatewaySecret) {
+    console.log(pc.red('✖ gatewaySecret is stored in omnimesh.config.yaml. Move it to .env (GATEWAY_SECRET) and rotate it if this file was ever committed.'));
+    hasErrors = true;
+  }
+
+  const gatewaySecret = envSecret || process.env.GATEWAY_SECRET || config.gatewaySecret;
   if (!gatewaySecret || gatewaySecret.length < 32) {
     console.log(
       pc.red(

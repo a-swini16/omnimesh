@@ -77,39 +77,49 @@ export class MemoryHealthStore implements HealthStore {
 export class KvHealthStore implements HealthStore {
   private kv: any;
   private memoryFallback: MemoryHealthStore;
+  // KV free tier: 100k reads and 1k writes per day. Cache reads briefly per isolate and
+  // only write on state changes, otherwise busy routers exhaust KV within minutes.
+  private readCache = new Map<string, { deadSince: number | null; fetchedAt: number }>();
+  private readCacheMs: number;
 
-  constructor(kvNamespace: any) {
+  constructor(kvNamespace: any, options: { readCacheMs?: number } = {}) {
     this.kv = kvNamespace;
     this.memoryFallback = new MemoryHealthStore();
+    this.readCacheMs = options.readCacheMs ?? 10_000;
+  }
+
+  private key(url: string): string {
+    return `health:dead:${encodeURIComponent(url)}`;
   }
 
   async isNodeHealthy(url: string, circuitTtlMs: number): Promise<boolean> {
-    if (!this.kv) return this.memoryFallback.isNodeHealthy(url, circuitTtlMs);
+    if (!(await this.memoryFallback.isNodeHealthy(url, circuitTtlMs))) return false;
+    if (!this.kv) return true;
 
     try {
-      const key = `health:dead:${encodeURIComponent(url)}`;
-      const deadSinceStr = await this.kv.get(key);
-      if (!deadSinceStr) return true;
-
-      const deadSince = Number(deadSinceStr);
-      if (Date.now() - deadSince > circuitTtlMs) {
-        await this.kv.delete(key);
-        return true;
+      let entry = this.readCache.get(url);
+      if (!entry || Date.now() - entry.fetchedAt > this.readCacheMs) {
+        const raw = await this.kv.get(this.key(url));
+        entry = { deadSince: raw ? Number(raw) : null, fetchedAt: Date.now() };
+        this.readCache.set(url, entry);
       }
-      return false;
+      return entry.deadSince === null || Date.now() - entry.deadSince > circuitTtlMs;
     } catch {
-      return this.memoryFallback.isNodeHealthy(url, circuitTtlMs);
+      return true;
     }
   }
 
   async markNodeDead(url: string, reason?: string): Promise<void> {
+    const cached = this.readCache.get(url);
     await this.memoryFallback.markNodeDead(url, reason);
-    if (!this.kv) return;
+    const now = Date.now();
+    this.readCache.set(url, { deadSince: now, fetchedAt: now });
+    // Another isolate already published this outage
+    if (!this.kv || (cached?.deadSince && now - cached.deadSince < 30_000)) return;
 
     try {
-      const key = `health:dead:${encodeURIComponent(url)}`;
-      // Auto-expire after 60s in KV
-      await this.kv.put(key, String(Date.now()), { expirationTtl: 60 });
+      // Auto-expire after 60s in KV (the KV minimum)
+      await this.kv.put(this.key(url), String(now), { expirationTtl: 60 });
     } catch {
       // Best effort KV write
     }
@@ -117,11 +127,13 @@ export class KvHealthStore implements HealthStore {
 
   async markNodeHealthy(url: string, latencyMs?: number): Promise<void> {
     await this.memoryFallback.markNodeHealthy(url, latencyMs);
-    if (!this.kv) return;
+    const cached = this.readCache.get(url);
+    // Only clear KV when this isolate believed the node was dead; never write on every success
+    if (!this.kv || !cached?.deadSince) return;
+    this.readCache.set(url, { deadSince: null, fetchedAt: Date.now() });
 
     try {
-      const key = `health:dead:${encodeURIComponent(url)}`;
-      await this.kv.delete(key);
+      await this.kv.delete(this.key(url));
     } catch {
       // Best effort KV delete
     }

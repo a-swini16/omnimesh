@@ -27,6 +27,11 @@ export const OmniMeshConfigSchema = z.object({
       circuitTtlMs: z.number().int().positive().default(30000),
       maxBufferBytes: z.number().int().positive().default(1048576), // 1MB safe payload buffer
       healthCheckIntervalSeconds: z.number().int().positive().default(60),
+      // priority: config order (failover only). weighted: spread load across healthy non-backup nodes by weight.
+      strategy: z.enum(['priority', 'weighted']).optional(),
+      // Consecutive app-level 5xx (e.g. 500) before a node's circuit opens. Timeouts,
+      // connection errors, 429, 502, 503 and 504 open it immediately.
+      failureThreshold: z.number().int().min(1).max(20).optional(),
     })
     .default({
       timeoutMs: 2500,

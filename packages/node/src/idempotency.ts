@@ -17,6 +17,24 @@ export class MemoryIdempotencyStore implements IdempotencyStore {
   private cache = new Map<string, { data: StoredResponse; expiresAt: number }>();
   private locks = new Map<string, number>();
 
+  private maxEntries: number;
+
+  constructor(maxEntries = 10000) {
+    this.maxEntries = maxEntries;
+  }
+
+  // Drop expired entries (and the oldest ones past maxEntries) so memory cannot grow without bound
+  private sweep(): void {
+    const now = Date.now();
+    for (const [k, v] of this.cache) if (now > v.expiresAt) this.cache.delete(k);
+    for (const [k, v] of this.locks) if (now > v) this.locks.delete(k);
+    while (this.cache.size > this.maxEntries) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest === undefined) break;
+      this.cache.delete(oldest);
+    }
+  }
+
   async get(key: string): Promise<StoredResponse | null> {
     const entry = this.cache.get(key);
     if (!entry) return null;
@@ -37,6 +55,7 @@ export class MemoryIdempotencyStore implements IdempotencyStore {
   }
 
   async set(key: string, data: StoredResponse, ttlSeconds: number): Promise<void> {
+    if (this.cache.size >= this.maxEntries) this.sweep();
     this.cache.set(key, {
       data,
       expiresAt: Date.now() + ttlSeconds * 1000,
@@ -58,16 +77,15 @@ export class UpstashRedisIdempotencyStore implements IdempotencyStore {
   private token: string;
 
   constructor(url?: string, token?: string) {
-    this.url = (url || process.env.UPSTASH_REDIS_REST_URL || process.env.REDIS_URL || '').replace(/\/$/, '');
+    this.url = (url || process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/$/, '');
     this.token = token || process.env.UPSTASH_REDIS_REST_TOKEN || '';
-  }
-
-  private isConfigured(): boolean {
-    return Boolean(this.url && this.token);
+    // Fail closed: a silently disabled idempotency store would let failover retries charge twice
+    if (!this.url || !this.token) {
+      throw new Error('[OmniMesh] UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required for UpstashRedisIdempotencyStore');
+    }
   }
 
   private async exec(command: any[]): Promise<any> {
-    if (!this.isConfigured()) return null;
     const res = await fetch(`${this.url}`, {
       method: 'POST',
       headers: {
@@ -75,14 +93,15 @@ export class UpstashRedisIdempotencyStore implements IdempotencyStore {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(command),
+      signal: AbortSignal.timeout(2000),
     });
+    if (!res.ok) throw new Error(`Upstash HTTP ${res.status}`);
     const json = await res.json() as { result: any; error?: string };
     if (json.error) throw new Error(`Upstash error: ${json.error}`);
     return json.result;
   }
 
   async get(key: string): Promise<StoredResponse | null> {
-    if (!this.isConfigured()) return null;
     const raw = await this.exec(['GET', `omnimesh:idemp:${key}`]);
     if (!raw) return null;
     try {
@@ -93,21 +112,23 @@ export class UpstashRedisIdempotencyStore implements IdempotencyStore {
   }
 
   async lock(key: string, ttlSeconds: number): Promise<boolean> {
-    if (!this.isConfigured()) return true;
     const result = await this.exec(['SET', `omnimesh:lock:${key}`, '1', 'EX', ttlSeconds, 'NX']);
     return result === 'OK';
   }
 
   async set(key: string, data: StoredResponse, ttlSeconds: number): Promise<void> {
-    if (!this.isConfigured()) return;
     await this.exec(['SET', `omnimesh:idemp:${key}`, JSON.stringify(data), 'EX', ttlSeconds]);
     await this.unlock(key);
   }
 
   async unlock(key: string): Promise<void> {
-    if (!this.isConfigured()) return;
     await this.exec(['DEL', `omnimesh:lock:${key}`]);
   }
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export interface IdempotencyOptions {
@@ -122,10 +143,17 @@ export function idempotency(options: IdempotencyOptions = {}) {
   const lockTtlSeconds = options.lockTtlSeconds || 30;
 
   return async function idempotencyMiddleware(c: Context, next: Next) {
-    const key = c.req.header('idempotency-key') || c.req.header('Idempotency-Key');
-    if (!key) {
+    const rawKey = c.req.header('idempotency-key');
+    if (!rawKey) {
       return next();
     }
+    if (rawKey.length > 255) {
+      return c.json({ error: 'Idempotency-Key must be at most 255 characters', code: 'ERR_IDEMPOTENCY_KEY_INVALID' }, 400);
+    }
+
+    // Scope the key to caller + route so one client cannot replay another client's stored response
+    const caller = c.req.header('authorization') || '';
+    const key = await sha256Hex(`${c.req.method}\n${c.req.path}\n${caller}\n${rawKey}`);
 
     // Check if result already cached
     const cached = await store.get(key);
@@ -142,6 +170,7 @@ export function idempotency(options: IdempotencyOptions = {}) {
     // Acquire execution lock
     const acquired = await store.lock(key, lockTtlSeconds);
     if (!acquired) {
+      c.header('Retry-After', '1');
       return c.json(
         {
           error: 'Conflict: An in-flight request with this Idempotency-Key is currently executing.',
@@ -152,16 +181,25 @@ export function idempotency(options: IdempotencyOptions = {}) {
     }
 
     try {
+      // Another node may have finished this key between our get() and lock()
+      const finished = await store.get(key);
+      if (finished) {
+        await store.unlock(key);
+        c.header('X-Omni-Idempotent-Replay', 'true');
+        return c.newResponse(finished.body, finished.status as any);
+      }
+
       await next();
 
       // Only cache successful or client error responses, not temporary 5xx errors
       const status = c.res.status;
-      if (status >= 200 && status < 500) {
+      if (status >= 200 && status < 500 && status !== 409 && status !== 429) {
         const cloned = c.res.clone();
         const bodyText = await cloned.text();
         const headers: Record<string, string> = {};
         cloned.headers.forEach((v, k) => {
-          headers[k] = v;
+          // Never replay cookies: they belong to the original caller's session
+          if (k.toLowerCase() !== 'set-cookie') headers[k] = v;
         });
 
         await store.set(key, { status, headers, body: bodyText }, ttlSeconds);

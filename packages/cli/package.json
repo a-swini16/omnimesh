@@ -1,7 +1,8 @@
 {
   "name": "omnimesh",
   "version": "1.0.0",
-  "description": "OmniMesh CLI — Zero-cost multi-cloud server federation with auto-failover",
+  "description": "OmniMesh CLI \u2014 Zero-cost multi-cloud server federation with auto-failover",
+  "type": "module",
   "bin": {
     "omnimesh": "./bin/omnimesh.js"
   },

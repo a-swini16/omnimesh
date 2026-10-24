@@ -67,7 +67,7 @@ export async function runInit(options: InitOptions = {}) {
   const profile = hasCard ? 'with-card' : 'no-card';
   const config: OmniMeshConfig = generateDefaultConfig(profile);
   config.domain = domain;
-  config.gatewaySecret = gatewaySecret;
+  // The secret lives only in .env: omnimesh.config.yaml is meant to be committed
 
   // 3. Write omnimesh.config.yaml
   const configPath = path.join(cwd, 'omnimesh.config.yaml');
@@ -79,11 +79,12 @@ export async function runInit(options: InitOptions = {}) {
   const envPath = path.join(cwd, '.env');
   const envExamplePath = path.join(cwd, '.env.example');
 
+  const jwtSecret = crypto.randomBytes(32).toString('hex');
   const envContent = `# OmniMesh Secrets & Provider Credentials
 # Generated on ${new Date().toISOString()}
 OMNIMESH_DOMAIN="${domain}"
 GATEWAY_SECRET="${gatewaySecret}"
-JWT_SECRET="${crypto.randomBytes(32).toString('hex')}"
+JWT_SECRET="${jwtSecret}"
 
 # Provider Tokens (fill in as you sign up)
 CLOUDFLARE_API_TOKEN=""
@@ -102,10 +103,14 @@ ${hasCard ? 'CF_TUNNEL_TOKEN=""\nORACLE_HOST=""\nR2_ACCESS_KEY_ID=""\nR2_SECRET_
 `;
 
   if (!fs.existsSync(envPath)) {
-    fs.writeFileSync(envPath, envContent, 'utf-8');
+    fs.writeFileSync(envPath, envContent, { encoding: 'utf-8', mode: 0o600 });
     console.log(pc.green(`✔ Created ${pc.bold('.env')} (origin secrets populated)`));
   }
-  fs.writeFileSync(envExamplePath, envContent.replace(gatewaySecret, 'your-32-char-min-gateway-secret'), 'utf-8');
+  // .env.example is committed, so every generated secret must be replaced
+  const envExample = envContent
+    .replace(gatewaySecret, 'generate-with-openssl-rand-hex-32')
+    .replace(jwtSecret, 'generate-with-openssl-rand-hex-32');
+  fs.writeFileSync(envExamplePath, envExample, 'utf-8');
   console.log(pc.green(`✔ Created ${pc.bold('.env.example')}`));
 
   // 5. Ensure .gitignore protects secrets

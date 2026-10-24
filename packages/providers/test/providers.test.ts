@@ -90,6 +90,6 @@ describe('OmniMesh Provider Adapter Registry & Verified Limits', () => {
         UPSTASH_REDIS_REST_URL: 'https://sample.upstash.io',
         UPSTASH_REDIS_REST_TOKEN: 'valid_token_sample_123',
       })
-    ).toBe(true);
+    ).toBe(false); // unreachable/fake endpoint must never count as valid
   });
 });

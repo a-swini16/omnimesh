@@ -1,9 +1,12 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
-import { gatewayAuth, signJwt, jwtAuth, healthHandler } from '@omnimesh/node';
+import { gatewayAuth, signJwt, jwtAuth, healthHandler, type JwtVariables } from '@omnimesh/node';
 
-const app = new Hono();
-const JWT_SECRET = process.env.JWT_SECRET || 'shared_jwt_secret_min_32_characters_long_for_security';
+const app = new Hono<{ Variables: JwtVariables }>();
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  throw new Error('JWT_SECRET (>= 32 chars) is required');
+}
 
 app.use('*', gatewayAuth());
 app.get('/health', healthHandler({ providerId: 'auth-service' }));
@@ -31,7 +34,7 @@ app.post('/auth/login', async (c) => {
 });
 
 // 2. Route protected by stateless JWT verification
-app.get('/auth/me', jwtAuth({ secret: JWT_SECRET }), (c) => {
+app.get('/auth/me', jwtAuth({ secret: JWT_SECRET }) as any, (c) => {
   const user = c.get('user');
   return c.json({ user });
 });

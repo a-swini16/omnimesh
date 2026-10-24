@@ -55,45 +55,54 @@ export async function prepareBufferedRequest(
     };
   }
 
-  // Safe to buffer into memory
-  try {
-    const bodyBuffer = await request.arrayBuffer();
-    if (bodyBuffer.byteLength > maxBufferBytes) {
-      return {
-        method,
-        url,
-        headers,
-        body: bodyBuffer,
-        bodyBuffer: null,
-        canRetry: false,
-        hasIdempotencyKey,
-      };
-    }
+  // Buffer into memory, but never read more than maxBufferBytes: a chunked body with no
+  // Content-Length could otherwise exhaust the isolate's memory
+  const bodyBuffer = await readBodyWithLimit(request, maxBufferBytes);
 
-    // Retries are safe for idempotent methods OR if an Idempotency-Key is provided
-    const isSafeMethod = IDEMPOTENT_METHODS.has(method);
-    const canRetry = isSafeMethod || hasIdempotencyKey;
+  // Retries are safe for idempotent methods OR if an Idempotency-Key is provided
+  const isSafeMethod = IDEMPOTENT_METHODS.has(method);
+  const canRetry = isSafeMethod || hasIdempotencyKey;
 
-    return {
-      method,
-      url,
-      headers,
-      body: bodyBuffer,
-      bodyBuffer,
-      canRetry,
-      hasIdempotencyKey,
-    };
-  } catch {
-    return {
-      method,
-      url,
-      headers,
-      body: null,
-      bodyBuffer: null,
-      canRetry: false,
-      hasIdempotencyKey,
-    };
+  return {
+    method,
+    url,
+    headers,
+    body: bodyBuffer,
+    bodyBuffer,
+    canRetry,
+    hasIdempotencyKey,
+  };
+}
+
+export class BodyTooLargeError extends Error {
+  constructor(limit: number) {
+    super(`Request body exceeds ${limit} bytes`);
+    this.name = 'BodyTooLargeError';
   }
+}
+
+async function readBodyWithLimit(request: Request, limit: number): Promise<ArrayBuffer | null> {
+  if (!request.body) return null;
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel().catch(() => {});
+      throw new BodyTooLargeError(limit);
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out.buffer;
 }
 
 /**

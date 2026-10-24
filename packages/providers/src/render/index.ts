@@ -18,7 +18,7 @@ export const renderAdapter: ProviderAdapter = {
       });
       return res.ok;
     } catch {
-      return apiKey.startsWith('rnd_');
+      return false; // unreachable API means unverified, never valid
     }
   },
 

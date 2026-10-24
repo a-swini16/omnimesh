@@ -20,7 +20,7 @@ export const upstashAdapter: ProviderAdapter = {
       const data = await res.json() as { result: string };
       return data.result === 'PONG';
     } catch {
-      return url.includes('upstash.io') && token.length > 15;
+      return false; // unreachable API means unverified, never valid
     }
   },
 

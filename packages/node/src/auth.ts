@@ -73,12 +73,17 @@ export async function verifyJwt(token: string, secret: string): Promise<Record<s
   }
 
   const [headerB64, payloadB64, signatureB64] = parts;
+  const header = JSON.parse(new TextDecoder().decode(base64UrlDecode(headerB64)));
+  // Pin the algorithm so a forged header (e.g. alg: none) can never change how we verify
+  if (header?.alg !== 'HS256') {
+    throw new Error('Unsupported JWT algorithm');
+  }
   const enc = new TextEncoder();
   const data = `${headerB64}.${payloadB64}`;
   const signature = base64UrlDecode(signatureB64);
 
   const key = await getHmacKey(secret);
-  const isValid = await crypto.subtle.verify('HMAC', key, signature as ArrayBufferView, enc.encode(data));
+  const isValid = await crypto.subtle.verify('HMAC', key, signature as unknown as BufferSource, enc.encode(data));
 
   if (!isValid) {
     throw new Error('Invalid JWT signature');
@@ -87,15 +92,19 @@ export async function verifyJwt(token: string, secret: string): Promise<Record<s
   const payloadJson = new TextDecoder().decode(base64UrlDecode(payloadB64));
   const payload = JSON.parse(payloadJson);
 
-  if (payload.exp && typeof payload.exp === 'number') {
-    const now = Math.floor(Date.now() / 1000);
-    if (now > payload.exp) {
-      throw new Error('JWT token has expired');
-    }
+  const now = Math.floor(Date.now() / 1000);
+  if (typeof payload.exp === 'number' && now > payload.exp) {
+    throw new Error('JWT token has expired');
+  }
+  if (typeof payload.nbf === 'number' && now < payload.nbf) {
+    throw new Error('JWT token is not yet valid');
   }
 
   return payload;
 }
+
+/** Hono context variables set by jwtAuth: `new Hono<{ Variables: JwtVariables }>()` */
+export type JwtVariables = { user: Record<string, any> };
 
 export interface JwtAuthOptions {
   secret?: string;
@@ -118,8 +127,8 @@ export function jwtAuth(options: JwtAuthOptions = {}) {
       return c.json({ error: 'Unauthorized: Missing or invalid Bearer token', code: 'ERR_AUTH_REQUIRED' }, 401);
     }
 
-    if (!secret) {
-      throw new Error('[OmniMesh] JWT_SECRET is not configured on this node');
+    if (!secret || secret.length < 32) {
+      throw new Error('[OmniMesh] JWT_SECRET must be configured with at least 32 characters on this node');
     }
 
     const token = authHeader.substring(7).trim();
@@ -127,8 +136,8 @@ export function jwtAuth(options: JwtAuthOptions = {}) {
       const claims = await verifyJwt(token, secret);
       c.set('user', claims);
       await next();
-    } catch (err: any) {
-      return c.json({ error: 'Unauthorized: Invalid token', code: 'ERR_TOKEN_INVALID', message: err.message }, 401);
+    } catch {
+      return c.json({ error: 'Unauthorized: Invalid token', code: 'ERR_TOKEN_INVALID' }, 401);
     }
   };
 }

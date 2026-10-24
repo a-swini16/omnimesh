@@ -2,6 +2,7 @@
   "name": "@omnimesh/core",
   "version": "1.0.0",
   "description": "Core schemas, types, and configuration engine for OmniMesh",
+  "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
   "types": "./src/index.ts",

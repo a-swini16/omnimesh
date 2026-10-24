@@ -19,7 +19,7 @@ export const cloudflareAdapter: ProviderAdapter = {
       const data = await res.json() as { success: boolean };
       return Boolean(data.success);
     } catch {
-      return token.length > 20; // Fallback mock check if offline
+      return false; // unreachable API means unverified, never valid
     }
   },
 

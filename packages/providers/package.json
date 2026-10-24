@@ -2,6 +2,7 @@
   "name": "@omnimesh/providers",
   "version": "1.0.0",
   "description": "Provider adapters and verified limits registry for OmniMesh",
+  "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
   "types": "./src/index.ts",

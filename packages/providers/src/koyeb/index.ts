@@ -21,7 +21,7 @@ export const koyebAdapter: ProviderAdapter = {
       });
       return res.ok;
     } catch {
-      return token.length > 15;
+      return false; // unreachable API means unverified, never valid
     }
   },
 

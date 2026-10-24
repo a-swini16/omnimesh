@@ -22,8 +22,8 @@ export function healthHandler(options: HealthCheckOptions = {}) {
         const ok = await options.checkDatabase();
         dbStatus = ok ? 'connected' : 'error';
         if (!ok) isHealthy = false;
-      } catch (err: any) {
-        dbStatus = `error: ${err.message}`;
+      } catch {
+        dbStatus = 'error'; // never expose driver messages (they can contain hostnames/credentials)
         isHealthy = false;
       }
     }
@@ -33,8 +33,8 @@ export function healthHandler(options: HealthCheckOptions = {}) {
         const ok = await options.checkRedis();
         redisStatus = ok ? 'connected' : 'error';
         if (!ok) isHealthy = false;
-      } catch (err: any) {
-        redisStatus = `error: ${err.message}`;
+      } catch {
+        redisStatus = 'error';
         if (!options.checkDatabase) isHealthy = false; // Degraded
       }
     }
@@ -49,7 +49,6 @@ export function healthHandler(options: HealthCheckOptions = {}) {
         database: dbStatus,
         redis: redisStatus,
       },
-      memory: typeof process !== 'undefined' && process.memoryUsage ? process.memoryUsage() : undefined,
     };
 
     return c.json(payload, isHealthy ? 200 : 503);

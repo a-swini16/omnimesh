@@ -1,7 +1,31 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "composite": false
+    "composite": false,
+    "types": [
+      "node"
+    ],
+    "paths": {
+      "@omnimesh/core": [
+        "./packages/core/src/index.ts"
+      ],
+      "@omnimesh/node": [
+        "./packages/node/src/index.ts"
+      ],
+      "@omnimesh/router": [
+        "./packages/router/src/index.ts"
+      ],
+      "@omnimesh/providers": [
+        "./packages/providers/src/index.ts"
+      ]
+    }
   },
-  "include": ["packages/**/*", "examples/**/*", "benchmarks/**/*"]
+  "include": [
+    "packages/**/*",
+    "examples/**/*"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "packages/providers/_template"
+  ]
 }

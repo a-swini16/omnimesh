@@ -8,6 +8,7 @@ import {
   jwtAuth,
   idempotency,
   MemoryIdempotencyStore,
+  UpstashRedisIdempotencyStore,
   healthHandler,
 } from '../src/index.js';
 
@@ -74,7 +75,7 @@ describe('@omnimesh/node Middleware Suite', () => {
     });
 
     it('jwtAuth middleware secures routes', async () => {
-      const app = new Hono();
+      const app = new Hono<{ Variables: { user: any } }>();
       app.use('/protected/*', jwtAuth({ secret: TEST_SECRET }));
       app.get('/protected/profile', (c) => {
         const user = c.get('user');
@@ -143,6 +144,29 @@ describe('@omnimesh/node Middleware Suite', () => {
       expect(json.status).toBe('healthy');
       expect(json.provider).toBe('koyeb');
       expect(json.uptimeSeconds).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('hardening', () => {
+    it('rejects JWTs whose header claims a different algorithm', async () => {
+      const token = await signJwt({ sub: 'u' }, TEST_SECRET);
+      const [, payload, sig] = token.split('.');
+      const noneHeader = btoa(JSON.stringify({ alg: 'none', typ: 'JWT' })).replace(/=+$/, '');
+      await expect(verifyJwt(`${noneHeader}.${payload}.${sig}`, TEST_SECRET)).rejects.toThrow(/algorithm/);
+    });
+
+    it('scopes idempotency keys per caller so users cannot read each other\'s replays', async () => {
+      const app = new Hono();
+      app.use('*', idempotency({ store: new MemoryIdempotencyStore() }));
+      app.post('/api/charge', (c) => c.json({ owner: c.req.header('authorization') }, 201));
+      await app.request('/api/charge', { method: 'POST', headers: { 'Idempotency-Key': 'k1', Authorization: 'Bearer alice' } });
+      const res = await app.request('/api/charge', { method: 'POST', headers: { 'Idempotency-Key': 'k1', Authorization: 'Bearer mallory' } });
+      expect(res.headers.get('X-Omni-Idempotent-Replay')).toBeNull();
+      expect(((await res.json()) as any).owner).toBe('Bearer mallory');
+    });
+
+    it('UpstashRedisIdempotencyStore fails closed when not configured', () => {
+      expect(() => new UpstashRedisIdempotencyStore('', '')).toThrow(/required/);
     });
   });
 });

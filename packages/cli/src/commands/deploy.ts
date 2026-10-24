@@ -94,9 +94,35 @@ export async function runDeploy(options: DeployOptions = {}) {
 
   // 3. Post-Deployment Automated Health Check Verification
   console.log(pc.cyan('\n3. Performing Post-Deployment Verification...'));
-  console.log(pc.green('   ✔ Gateway secret verification: PASS'));
-  console.log(pc.green('   ✔ Pool resolution & failover routing: PASS'));
-  console.log(pc.green('   ✔ Quota meters initialized: PASS'));
+  if (options.dryRun) {
+    console.log(pc.dim('   (skipped in dry-run)'));
+  } else {
+    // Real check: every pool needs at least one node answering /health with our gateway secret
+    const secret = envConfig.GATEWAY_SECRET || '';
+    let allPoolsServing = true;
+    for (const [poolPath, nodes] of Object.entries(config.pools)) {
+      let healthy = 0;
+      for (const rawNode of nodes as any[]) {
+        const url = (typeof rawNode === 'string' ? rawNode : rawNode.url).replace(/\/$/, '');
+        try {
+          const res = await fetch(`${url}/health`, {
+            headers: { 'X-Gateway-Secret': secret },
+            signal: AbortSignal.timeout(5000),
+          });
+          if (res.ok) healthy++;
+        } catch {
+          // counted as unhealthy
+        }
+      }
+      const line = `   ${poolPath}: ${healthy}/${(nodes as any[]).length} nodes healthy`;
+      console.log(healthy > 0 ? pc.green(`✔${line}`) : pc.red(`✖${line}`));
+      if (healthy === 0) allPoolsServing = false;
+    }
+    if (!allPoolsServing) {
+      console.log(pc.bold(pc.red('\n✖ Deployment verification failed: at least one pool has no healthy node.')));
+      return false;
+    }
+  }
 
   console.log(pc.bold(pc.green('\n🎉 OmniMesh deployment completed successfully!')));
   console.log(`Unified Endpoint: ${pc.bold(pc.cyan(`https://${config.domain}`))}\n`);

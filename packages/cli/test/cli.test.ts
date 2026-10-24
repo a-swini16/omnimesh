@@ -38,8 +38,16 @@ describe('OmniMesh CLI Suite (init, doctor, deploy, chaos, add/remove)', () => {
     const parsed = parseOmniMeshConfigYaml(configContent);
     expect(parsed.domain).toBe('api.testdomain.com');
     expect(parsed.profile).toBe('no-card');
-    expect(parsed.gatewaySecret).toBeDefined();
-    expect(parsed.gatewaySecret?.length).toBeGreaterThanOrEqual(32);
+    // Secrets must never land in the committed config or .env.example
+    expect(parsed.gatewaySecret).toBeUndefined();
+    const env = fs.readFileSync(envPath, 'utf-8');
+    const secret = env.match(/GATEWAY_SECRET="([^"]+)"/)![1];
+    const jwt = env.match(/JWT_SECRET="([^"]+)"/)![1];
+    expect(secret.length).toBeGreaterThanOrEqual(32);
+    const example = fs.readFileSync(path.join(tmpDir, '.env.example'), 'utf-8');
+    expect(example).not.toContain(secret);
+    expect(example).not.toContain(jwt);
+    expect(fs.statSync(envPath).mode & 0o077).toBe(0);
 
     // Doctor checks passes on freshly initialized project
     const doctorPassed = await runDoctor({ cwd: tmpDir });
@@ -73,6 +81,6 @@ describe('OmniMesh CLI Suite (init, doctor, deploy, chaos, add/remove)', () => {
 
   it('executes live chaos simulation proving sub-3s failover', async () => {
     // Chaos spins up 2 ephemeral mock nodes, kills primary, and tests router failover
-    await expect(runChaos({ timeoutMs: 1000 })).resolves.not.toThrow();
+    await expect(runChaos({ timeoutMs: 1000 })).resolves.toBe(true);
   });
 });

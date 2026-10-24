@@ -18,7 +18,7 @@ export const netlifyAdapter: ProviderAdapter = {
       });
       return res.ok;
     } catch {
-      return token.length > 20;
+      return false; // unreachable API means unverified, never valid
     }
   },
 
