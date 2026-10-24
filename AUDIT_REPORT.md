@@ -1,18 +1,18 @@
 # OmniMesh Audit Report
 
 Scope: lean (decision D4 in [AUDIT_PLAN.md](AUDIT_PLAN.md)). Source of truth: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-Status: **in progress.** The Critical issue and 4 of 6 High issues are fixed; load testing has not started.
+Status: **in progress.** All 6 High issues are fixed; 1 of 2 Critical is fixed (C-2 was found during H-5 work); load testing has not started.
 
 | Severity | Found | Fixed | Open |
 |---|---|---|---|
-| Critical | 1 | 1 | 0 |
-| High | 6 | 4 | 2 |
+| Critical | 2 | 1 | 1 |
+| High | 6 | 6 | 0 |
 | Medium | 9 | 0 | 9 |
 | Low | 4 | 0 | 4 |
 
-**Is this safe for real users yet? Not yet.** Two High issues are open: rate limiting is not shared across router instances (H-4), and `omnimesh deploy` adapters report fake success (H-5). None of the load and chaos scenarios have been run against a mock mesh yet. Fixes from the two earlier hardening commits (`4b741e8`, `15fd726`) are listed at the end.
+**Is this safe for real users yet? Not yet.** C-2 is open: right after `init`, `omnimesh status`/`deploy` send the gateway secret to placeholder hostnames owned by third parties. Also, none of the load and chaos scenarios have been run against a mock mesh yet. Fixes from the two earlier hardening commits (`4b741e8`, `15fd726`) are listed at the end.
 
-Tests: 52/52 pass; strict typecheck clean.
+Tests: 55/55 pass; strict typecheck clean.
 
 ---
 
@@ -23,6 +23,13 @@ How to reproduce: two Hono apps, each with `idempotency()` and no store; POST th
 Fix: use Upstash automatically when `UPSTASH_REDIS_REST_*` is set; in production, refuse to start without a shared store.
 Test: `packages/node/test/middleware.test.ts` › `[C-1]` (failed before the fix).
 Status: FIXED in `d28ebdb`
+
+### [C-2] CLI sends the gateway secret to placeholder hosts owned by third parties — CRITICAL
+Area: CLI | Files: `packages/core/src/config.ts` (`generateDefaultConfig` pools), `packages/cli/src/commands/status.ts`, `packages/cli/src/commands/deploy.ts`
+What happens: `init` writes example pool URLs such as `https://core-api.koyeb.app` and `https://webhooks.netlify.app`. Those names can belong to anyone. `omnimesh status` and `omnimesh deploy` then send `X-Gateway-Secret` to every pool URL, so running them before editing the pools gives the secret to whoever owns those apps.
+How to reproduce: `omnimesh init --no-card --quick`, then `omnimesh status` (not run during the audit, to avoid sending a secret to a third party).
+Fix (proposed): mark generated URLs as placeholders (e.g. `https://REPLACE-ME.koyeb.app`, an unregistrable name), and have the CLI and router refuse to contact a placeholder; `doctor` reports which pools still need real URLs.
+Status: OPEN
 
 ### [H-1] Reused Idempotency-Key with a different body was silently replayed — HIGH
 Area: node middleware | File: `packages/node/src/idempotency.ts`
@@ -48,14 +55,16 @@ Status: FIXED in `7380144`. Remaining: choose and publish an npm name you contro
 ### [H-4] Rate limiting not shared across router instances — HIGH
 Area: router | File: `packages/router/src/rate-limiter.ts`
 What happens: `MemoryRateLimiter` counts per isolate. Cloudflare runs many isolates, so a distributed bot gets roughly limit × isolates. There is no per-user limit.
-Plan: wire the Cloudflare rate-limit binding (shared, free-plan friendly) in an example `wrangler.toml` and make it the documented default; add per-user keys. Upstash per request would burn its 10k/day command quota.
-Status: OPEN
+Fix: the router limits per IP **and** per caller (a SHA-256 of the `Authorization` header, so raw tokens never reach the limiter). The Worker uses the shared Cloudflare `RATE_LIMITER` binding; `packages/router/wrangler.toml.example` configures it, and the Worker warns once when it is missing. Upstash was rejected: one command per request would use up its 10k/day free quota.
+Test: `packages/router/test/worker-rate-limit.test.ts` (both failed before the fix).
+Status: FIXED in `6d28df2`. Remaining: Cloudflare's binding counts per Cloudflare location, not globally; for one exact global limit, add a Cloudflare WAF rate-limit rule. The login lockout in the auth example is still per process.
 
 ### [H-5] Provider adapters report deploys and usage that never happened — HIGH
 Area: providers | Files: `packages/providers/src/*/index.ts`
 What happens: `deploy()` returns `success: true` without calling any API; `getUsage()` returns hardcoded numbers.
-Plan: make `deploy()` say plainly that deployment happens through each provider's GitHub integration (architecture v1 §5.3), and remove the fake usage numbers.
-Status: OPEN
+Fix: every adapter's `deploy()` throws `DeployNotAutomatedError` with the real path: Git auto-deploy (compute), `wrangler deploy` (Cloudflare router), `docker compose` (Oracle), or the dashboard (managed data services). The fake `getUsage()` numbers are removed. `omnimesh deploy` prints that guidance, then runs its real `/health` verification.
+Test: `packages/providers/test/providers.test.ts` › `[H-5]` (failed before the fix).
+Status: FIXED in `cd5ac89`. Remaining: real API deploys and the rollback described in architecture §9 are not implemented.
 
 ---
 
