@@ -1,18 +1,18 @@
 # OmniMesh Audit Report
 
 Scope: lean (decision D4 in [AUDIT_PLAN.md](AUDIT_PLAN.md)). Source of truth: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-Status: **in progress.** Every Critical and the first 6 High issues are fixed. The 6 lean load scenarios have run (results below); they found 3 new High issues, which are open.
+Status: **in progress.** Every known Critical and High issue is fixed, and all 6 lean load scenarios pass except the cross-user cache headers (M-9, Medium). Medium/Low issues and the independent re-audit are next.
 
 | Severity | Found | Fixed | Open |
 |---|---|---|---|
 | Critical | 2 | 2 | 0 |
-| High | 9 | 6 | 3 |
+| High | 9 | 9 | 0 |
 | Medium | 9 | 0 | 9 |
 | Low | 4 | 0 | 4 |
 
-**Is this safe for real users yet? Not yet.** Failover, idempotency (0 duplicate orders under a 500-buyer flash sale), quota switching and clean outages all held up under load. But load testing found that one client with ~10 malformed requests can open the circuit on every node (H-7), request bodies have no hard size cap (H-6), and the "CDN absorbs 85–90% of reads" capacity claim is wrong on Cloudflare (H-8, needs your decision). 9 Medium issues are still open, and no independent re-audit has happened. Fixes from the two earlier hardening commits (`4b741e8`, `15fd726`) are listed at the end.
+**Is this safe for real users yet? Not yet, but close on the request path.** Every known Critical and High issue is fixed with a test. Under load, failover, idempotency (0 duplicate orders across 500 buyers), quota switching, clean outages and bad-input handling all hold. Before launch: 9 Medium issues are open, including private responses not marked uncacheable (M-9), missing gateway-secret rotation (M-2) and backend URLs leaking through redirects (M-1). 9 of the 15 load scenarios (including the 30-minute soak) have not run, and no independent re-audit has happened.
 
-Tests: 59/59 pass; strict typecheck clean.
+Tests: 62/62 pass; strict typecheck clean.
 
 ---
 
@@ -74,23 +74,27 @@ Status: FIXED in `cd5ac89`. Remaining: real API deploys and the rollback describ
 Area: router | File: `packages/router/src/dispatcher.ts` (`prepareBufferedRequest`)
 What happens: bodies with a `Content-Length` above `maxBufferBytes` are streamed to the node with no upper limit. In `bad-input`, a 5 MB body went straight to the node, which crashed while parsing it, and the client got a misleading `503` saying to attach an Idempotency-Key. An attacker can push huge uploads at free-tier nodes, using up their bandwidth quota and memory.
 How to reproduce: `benchmarks/mock-mesh/run.sh bad-input`
-Fix (proposed): add `router.maxBodyBytes` (e.g. 10 MB default), answer `413` when `Content-Length` exceeds it, and abort streamed bodies that pass it.
-Status: OPEN
+Fix: new `router.maxBodyBytes` (default 10 MB). A `Content-Length` over it gets `413 ERR_BODY_TOO_LARGE` before any node is contacted. Bodies without a length were already capped at `maxBufferBytes`.
+Test: `packages/router/test/failover.test.ts` › `[H-6]` (failed before the fix); load scenario `bad-input`: 11 MB body → 413.
+Status: FIXED in `c774746`
 
 ### [H-7] One client can open the circuit on every node with malformed input — HIGH
 Area: router + node | Files: `packages/router/src/router.ts` (soft-failure handling), `examples/rest-api` pattern
 What happens: an app that parses JSON without guarding it answers malformed input with `500`. The router counts each `500` as a node failure, and with an Idempotency-Key retries it on 3 nodes (3× amplification). In `bad-input`, **10 malformed requests opened the circuit on all 5 nodes.** Reads kept working only because dead nodes are still tried as a last resort. Weighted and quota routing were disrupted, and with the KV store, every isolate would see all nodes as down.
 How to reproduce: `benchmarks/mock-mesh/run.sh bad-input`
-Fix (proposed): (a) `@omnimesh/node` ships an error handler that turns body-parse errors into `400`, and the examples use it; (b) **decision for you:** the architecture (§5 and v1 §4.2) says a `500` triggers failover. I recommend that a `500` is still retried for GET but no longer counts toward opening a node's circuit; only timeouts, connection errors, `429` and `502`–`504` would.
-Status: OPEN
+Fix (owner-approved change to architecture §5): only timeouts, connection errors, `429` and `502`–`504` open a node's circuit. Other `5xx` (the app's own answer) are retried for GET/HEAD and passed through unchanged for writes, which removes the 3× amplification. `@omnimesh/node` adds `omniErrorHandler` (malformed JSON → `400 ERR_BAD_JSON`; internal errors logged but never sent to clients), and every example uses it. `router.failureThreshold` is now ignored and kept only so existing configs validate.
+Test: `packages/router/test/failover.test.ts` › both `[H-7]` tests and `packages/node/test/middleware.test.ts` › `[H-7]` (all 3 failed before the fix); load scenario `bad-input` after the fix: malformed JSON → 400 on the first attempt; after 30 app errors and 10 malformed requests, the primary still served 100/100 reads on its first try.
+Status: FIXED in `d92dae4`
 
 ### [H-8] Cached reads do not bypass the Worker on Cloudflare (architecture issue) — HIGH
 Area: architecture / capacity | Docs: `docs/ARCHITECTURE.md` §2–3, v1 §4.1, README "absorbs 85–90% read traffic"
 What happens: the design puts a Cloudflare Cache Rule "ahead of the Worker route" so cached reads never invoke the Worker. Cloudflare's docs say the opposite: Workers run **before** the cache, and cache hits on a Worker route still count as Worker requests toward the free plan's 100,000/day ([Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/), [Workers Cache](https://developers.cloudflare.com/workers/cache/)). So in no-card mode, **every** request through the router, cached or not, counts against the 100,000/day ceiling.
-Fix (needs your decision): either (a) route only dynamic paths (e.g. `/api/orders*`, `/auth*`) to the Worker, and serve public cacheable GETs on a separate proxied hostname with Cache Rules (no failover for those paths without paid Load Balancing); or (b) keep one route and document 100,000 requests/day as the real free ceiling.
-Status: OPEN, decision needed
+Fix (owner decision: keep one route): the README diagram and limits section now state the 100,000 requests/day ceiling (error 1027 after it), and `docs/ARCHITECTURE.md` carries an errata note. Not unit-testable (documentation only).
+Status: FIXED in `4969e87`
 
 ## Load-test results (local mock mesh)
+
+Scenarios 3, 4, 7 and 8 ran before H-6/H-7; those fixes only change body-size and app-`5xx` handling, which those scenarios do not exercise.
 
 Harness: `benchmarks/mock-mesh/` contains 5 mock providers (shared idempotency store and orders table standing in for Upstash/Postgres) and the real router on the Node adapter. k6 runs from Docker image `grafana/k6:1.0.0`. Run any scenario with `benchmarks/mock-mesh/run.sh <name>`. All numbers are from one Linux machine; they measure router *behavior*, not Cloudflare edge latency.
 
@@ -100,7 +104,7 @@ Harness: `benchmarks/mock-mesh/` contains 5 mock providers (shared idempotency s
 | 4 | **Primary dies** (hangs) at 10 s during 100 req/s for 40 s | ✅ PASS | 4,001/4,001 succeeded; **exactly 250 slow requests** (= 100 req/s × 2.5 s, the ones already in flight); every later request skipped the dead node; p50 1.6 ms, max 2.5 s |
 | 7 | **All nodes down** (hang), then recovery | ✅ PASS | 100% clean `503 ERR_FAILOVER_EXHAUSTED`; max 6.01 s (budget 6 s); after recovery 500/500 succeeded at once |
 | 8 | **Quota + 429:** koyeb 1,000/day quota, render answers 429 | ✅ PASS | 3,000/3,000 succeeded, 0 client errors; koyeb served 976 (target 950, small overshoot from 50 concurrent requests), render 0, vercel 2,024; ~1,400 req/s |
-| 11 | **Bad input:** 5 MB body, malformed JSON, then reads | ❌ FAIL | 5 MB body not rejected (→ H-6); malformed JSON gave 5xx and opened every node's circuit (→ H-7); 100/100 later reads still succeeded |
+| 11 | **Bad input:** oversized body, malformed JSON, buggy endpoint, then reads | ✅ PASS (after H-6/H-7) | 11 MB body → `413`; malformed JSON → `400` on the first attempt; 30 app `500`s opened no circuit; the primary then served 100/100 reads on its first try. *Before the fixes: the body was not rejected and 10 requests opened every node's circuit.* |
 | 13 | **Cross-user cache:** users A and B read `/api/me` concurrently, 50 VUs | ⚠️ PARTIAL | **0 of 48,605 responses had the other user's data**; but 100% lacked `Cache-Control: private`/`no-store` and `Vary: Authorization` (→ M-9 confirmed); ~3,200 req/s |
 
 Not run (outside the lean scope): scenarios 1, 2, 5, 6, 9, 10, 12, 14, 15; slowloris (handled by Cloudflare's edge in production; the local Node adapter would not be representative); router CPU time per request (needs Miniflare).
