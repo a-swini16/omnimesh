@@ -12,19 +12,25 @@ export interface HealthStore {
  * Fast in-memory health store for single-instance, local dev, or fallback.
  */
 export class MemoryHealthStore implements HealthStore {
-  private deadNodes = new Map<string, { deadSince: number; reason?: string }>();
+  private deadNodes = new Map<string, { deadSince: number; reason?: string; probeStartedAt?: number }>();
   private healthyNodes = new Map<string, { lastChecked: number; latencyMs?: number }>();
+
+  /** How long a granted probe holds the half-open slot if it never reports back */
+  constructor(private probeTimeoutMs = 10_000) {}
 
   async isNodeHealthy(url: string, circuitTtlMs: number): Promise<boolean> {
     const dead = this.deadNodes.get(url);
     if (!dead) return true;
 
-    if (Date.now() - dead.deadSince > circuitTtlMs) {
-      // Circuit breaker half-open: give node a chance to recover
-      this.deadNodes.delete(url);
-      return true;
-    }
-    return false;
+    const now = Date.now();
+    if (now - dead.deadSince <= circuitTtlMs) return false;
+
+    // Half-open: let exactly one request probe the node. Everyone else keeps skipping it until the
+    // probe succeeds (markNodeHealthy closes the circuit) or fails (markNodeDead re-opens it).
+    // A probe that never reports back (e.g. not attempted) frees the slot after probeTimeoutMs.
+    if (dead.probeStartedAt !== undefined && now - dead.probeStartedAt < this.probeTimeoutMs) return false;
+    dead.probeStartedAt = now;
+    return true;
   }
 
   async markNodeDead(url: string, reason?: string): Promise<void> {
