@@ -179,6 +179,28 @@ importers:
         specifier: ^3.0.7
         version: 3.2.7(@types/node@22.20.5)(tsx@4.23.15)(yaml@2.9.1)
 
+  benchmarks:
+    dependencies:
+      '@hono/node-server':
+        specifier: ^1.13.8
+        version: 1.19.17(hono@4.13.13)
+      '@omnimesh/core':
+        specifier: workspace:*
+        version: link:../packages/core
+      '@omnimesh/node':
+        specifier: workspace:*
+        version: link:../packages/node
+      '@omnimesh/router':
+        specifier: workspace:*
+        version: link:../packages/router
+      hono:
+        specifier: ^4.7.2
+        version: 4.13.13
+    devDependencies:
+      tsx:
+        specifier: ^4.19.3
+        version: 4.23.15
+
   examples/auth-service:
     dependencies:
       '@hono/node-server':

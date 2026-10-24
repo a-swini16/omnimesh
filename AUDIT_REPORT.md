@@ -1,16 +1,16 @@
 # OmniMesh Audit Report
 
 Scope: lean (decision D4 in [AUDIT_PLAN.md](AUDIT_PLAN.md)). Source of truth: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-Status: **in progress.** All Critical and High issues are fixed; Medium/Low and load testing are next.
+Status: **in progress.** Every Critical and the first 6 High issues are fixed. The 6 lean load scenarios have run (results below); they found 3 new High issues, which are open.
 
 | Severity | Found | Fixed | Open |
 |---|---|---|---|
 | Critical | 2 | 2 | 0 |
-| High | 6 | 6 | 0 |
+| High | 9 | 6 | 3 |
 | Medium | 9 | 0 | 9 |
 | Low | 4 | 0 | 4 |
 
-**Is this safe for real users yet? Not yet.** Every known Critical and High issue is fixed and tested, but none of the load and chaos scenarios (§6) have been run against a mock mesh, 9 Medium issues are open, and no independent re-audit has happened. Fixes from the two earlier hardening commits (`4b741e8`, `15fd726`) are listed at the end.
+**Is this safe for real users yet? Not yet.** Failover, idempotency (0 duplicate orders under a 500-buyer flash sale), quota switching and clean outages all held up under load. But load testing found that one client with ~10 malformed requests can open the circuit on every node (H-7), request bodies have no hard size cap (H-6), and the "CDN absorbs 85–90% of reads" capacity claim is wrong on Cloudflare (H-8, needs your decision). 9 Medium issues are still open, and no independent re-audit has happened. Fixes from the two earlier hardening commits (`4b741e8`, `15fd726`) are listed at the end.
 
 Tests: 59/59 pass; strict typecheck clean.
 
@@ -70,9 +70,48 @@ Status: FIXED in `cd5ac89`. Remaining: real API deploys and the rollback describ
 
 ---
 
+### [H-6] No hard cap on request body size — HIGH
+Area: router | File: `packages/router/src/dispatcher.ts` (`prepareBufferedRequest`)
+What happens: bodies with a `Content-Length` above `maxBufferBytes` are streamed to the node with no upper limit. In `bad-input`, a 5 MB body went straight to the node, which crashed while parsing it, and the client got a misleading `503` saying to attach an Idempotency-Key. An attacker can push huge uploads at free-tier nodes, using up their bandwidth quota and memory.
+How to reproduce: `benchmarks/mock-mesh/run.sh bad-input`
+Fix (proposed): add `router.maxBodyBytes` (e.g. 10 MB default), answer `413` when `Content-Length` exceeds it, and abort streamed bodies that pass it.
+Status: OPEN
+
+### [H-7] One client can open the circuit on every node with malformed input — HIGH
+Area: router + node | Files: `packages/router/src/router.ts` (soft-failure handling), `examples/rest-api` pattern
+What happens: an app that parses JSON without guarding it answers malformed input with `500`. The router counts each `500` as a node failure, and with an Idempotency-Key retries it on 3 nodes (3× amplification). In `bad-input`, **10 malformed requests opened the circuit on all 5 nodes.** Reads kept working only because dead nodes are still tried as a last resort. Weighted and quota routing were disrupted, and with the KV store, every isolate would see all nodes as down.
+How to reproduce: `benchmarks/mock-mesh/run.sh bad-input`
+Fix (proposed): (a) `@omnimesh/node` ships an error handler that turns body-parse errors into `400`, and the examples use it; (b) **decision for you:** the architecture (§5 and v1 §4.2) says a `500` triggers failover. I recommend that a `500` is still retried for GET but no longer counts toward opening a node's circuit; only timeouts, connection errors, `429` and `502`–`504` would.
+Status: OPEN
+
+### [H-8] Cached reads do not bypass the Worker on Cloudflare (architecture issue) — HIGH
+Area: architecture / capacity | Docs: `docs/ARCHITECTURE.md` §2–3, v1 §4.1, README "absorbs 85–90% read traffic"
+What happens: the design puts a Cloudflare Cache Rule "ahead of the Worker route" so cached reads never invoke the Worker. Cloudflare's docs say the opposite: Workers run **before** the cache, and cache hits on a Worker route still count as Worker requests toward the free plan's 100,000/day ([Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/), [Workers Cache](https://developers.cloudflare.com/workers/cache/)). So in no-card mode, **every** request through the router, cached or not, counts against the 100,000/day ceiling.
+Fix (needs your decision): either (a) route only dynamic paths (e.g. `/api/orders*`, `/auth*`) to the Worker, and serve public cacheable GETs on a separate proxied hostname with Cache Rules (no failover for those paths without paid Load Balancing); or (b) keep one route and document 100,000 requests/day as the real free ceiling.
+Status: OPEN, decision needed
+
+## Load-test results (local mock mesh)
+
+Harness: `benchmarks/mock-mesh/` contains 5 mock providers (shared idempotency store and orders table standing in for Upstash/Postgres) and the real router on the Node adapter. k6 runs from Docker image `grafana/k6:1.0.0`. Run any scenario with `benchmarks/mock-mesh/run.sh <name>`. All numbers are from one Linux machine; they measure router *behavior*, not Cloudflare edge latency.
+
+| # | Scenario | Result | Key numbers |
+|---|---|---|---|
+| 3 | **Flash sale:** 500 buyers, primary writes then answers after 2.6 s (> 2.5 s timeout), clients retry | ✅ PASS | **500 orders, 0 duplicates, 0 missing**; 100% got 201; p50 2.93 s, p99 3.25 s (the first wave waits out the timeout) |
+| 4 | **Primary dies** (hangs) at 10 s during 100 req/s for 40 s | ✅ PASS | 4,001/4,001 succeeded; **exactly 250 slow requests** (= 100 req/s × 2.5 s, the ones already in flight); every later request skipped the dead node; p50 1.6 ms, max 2.5 s |
+| 7 | **All nodes down** (hang), then recovery | ✅ PASS | 100% clean `503 ERR_FAILOVER_EXHAUSTED`; max 6.01 s (budget 6 s); after recovery 500/500 succeeded at once |
+| 8 | **Quota + 429:** koyeb 1,000/day quota, render answers 429 | ✅ PASS | 3,000/3,000 succeeded, 0 client errors; koyeb served 976 (target 950, small overshoot from 50 concurrent requests), render 0, vercel 2,024; ~1,400 req/s |
+| 11 | **Bad input:** 5 MB body, malformed JSON, then reads | ❌ FAIL | 5 MB body not rejected (→ H-6); malformed JSON gave 5xx and opened every node's circuit (→ H-7); 100/100 later reads still succeeded |
+| 13 | **Cross-user cache:** users A and B read `/api/me` concurrently, 50 VUs | ⚠️ PARTIAL | **0 of 48,605 responses had the other user's data**; but 100% lacked `Cache-Control: private`/`no-store` and `Vary: Authorization` (→ M-9 confirmed); ~3,200 req/s |
+
+Not run (outside the lean scope): scenarios 1, 2, 5, 6, 9, 10, 12, 14, 15; slowloris (handled by Cloudflare's edge in production; the local Node adapter would not be representative); router CPU time per request (needs Miniflare).
+
+**Measured failover time:** the first requests after a node hangs take one timeout (2.5 s); after that, 0 extra latency. When a node errors fast (5xx or connection refused), failover adds only that node's response time (milliseconds).
+
+**Realistic free capacity (no-card mode):** limited by the router, not by compute. Cloudflare Workers Free allows 100,000 requests/day, about 3M/month, resetting at midnight UTC, and per H-8 that includes cached reads. Adding Oracle or more providers raises compute capacity but not this ceiling. Beyond it, you need a paid Workers plan (same code) or option (a) under H-8.
+
 ## Medium and Low (open)
 
-M-1 `Location` header leaks backend URLs · M-2 no gateway-secret rotation · M-3 unmatched paths fall through to `/api` · M-4 JWT has no `iss`/`aud` and `exp` is optional · M-5 no single-probe half-open circuit · M-6 config accepts empty pools and duplicate prefixes · M-7 `init` overwrites files and keep-alive is on by default · M-8 unpinned `cloudflared:latest` · M-9 cross-user cache test not written yet · L-1 k6 fallback secret · L-2 no root `.env.example` · L-3 `any` casts in request paths · L-4 unreproduced README benchmark numbers. Details in [AUDIT_PLAN.md §4](AUDIT_PLAN.md).
+M-1 `Location` header leaks backend URLs · M-2 no gateway-secret rotation · M-3 unmatched paths fall through to `/api` · M-4 JWT has no `iss`/`aud` and `exp` is optional · M-5 no single-probe half-open circuit · M-6 config accepts empty pools and duplicate prefixes · M-7 `init` overwrites files and keep-alive is on by default · M-8 unpinned `cloudflared:latest` · M-9 confirmed by load test: private responses are not marked `private`/`Vary` (no data mixing at the router) · L-1 k6 fallback secret · L-2 no root `.env.example` · L-3 `any` casts in request paths · L-4 unreproduced README benchmark numbers. Details in [AUDIT_PLAN.md §4](AUDIT_PLAN.md).
 
 ## Fixed earlier on this branch (`4b741e8`, `15fd726`)
 
@@ -80,4 +119,4 @@ Secrets written to the committed config and `.env.example` · backend URLs expos
 
 ## Not yet run
 
-Load-test scenarios (§6), measured failover time and capacity numbers, human walkthroughs (§7), OSS readiness (§8), and the independent subagent re-audit.
+The other 9 load scenarios, router CPU timing, human walkthroughs (§7), OSS readiness (§8), and the independent subagent re-audit.
