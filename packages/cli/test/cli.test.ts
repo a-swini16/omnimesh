@@ -11,6 +11,7 @@ import {
   runChaos,
 } from '../src/index.js';
 import { parseOmniMeshConfigYaml } from '@omnimesh/core';
+import { spawnSync } from 'node:child_process';
 
 describe('OmniMesh CLI Suite (init, doctor, deploy, chaos, add/remove)', () => {
   let tmpDir: string;
@@ -88,5 +89,13 @@ describe('OmniMesh CLI Suite (init, doctor, deploy, chaos, add/remove)', () => {
   it('executes live chaos simulation proving sub-3s failover', async () => {
     // Chaos spins up 2 ephemeral mock nodes, kills primary, and tests router failover
     await expect(runChaos({ timeoutMs: 1000 })).resolves.toBe(true);
+  });
+
+  it('[H-3] the omnimesh binary runs straight from a clean checkout', () => {
+    const bin = path.resolve(__dirname, '../bin/omnimesh.js');
+    const out = spawnSync(process.execPath, [bin, '--help'], { encoding: 'utf-8', timeout: 30000 });
+    expect(out.stderr).not.toMatch(/ERR_MODULE_NOT_FOUND/);
+    expect(out.status).toBe(0);
+    expect(out.stdout).toContain('init');
   });
 });

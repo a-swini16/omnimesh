@@ -1,7 +1,7 @@
 {
   "name": "omnimesh",
   "version": "1.0.0",
-  "description": "OmniMesh CLI \u2014 Zero-cost multi-cloud server federation with auto-failover",
+  "description": "OmniMesh CLI — Zero-cost multi-cloud server federation with auto-failover",
   "type": "module",
   "bin": {
     "omnimesh": "./bin/omnimesh.js"
@@ -16,15 +16,16 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@hono/node-server": "^1.13.8",
     "@omnimesh/core": "workspace:*",
+    "@omnimesh/node": "workspace:*",
     "@omnimesh/providers": "workspace:*",
     "@omnimesh/router": "workspace:*",
-    "@omnimesh/node": "workspace:*",
     "commander": "^13.1.0",
-    "picocolors": "^1.1.1",
-    "yaml": "^2.7.0",
     "hono": "^4.7.2",
-    "@hono/node-server": "^1.13.8"
+    "picocolors": "^1.1.1",
+    "tsx": "^4.23.15",
+    "yaml": "^2.7.0"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

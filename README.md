@@ -33,6 +33,15 @@ Incoming Request: GET https://api.yourdomain.com/api/products
 
 ## 🚀 Quickstart in 3 Commands
 
+> The `omnimesh` package is **not on npm yet**, so `npx omnimesh` will not work. Until it is published, run the CLI from a clone:
+>
+> ```bash
+> git clone https://github.com/omnimesh/omnimesh.git && cd omnimesh && pnpm install
+> alias omnimesh="node $PWD/packages/cli/bin/omnimesh.js"
+> ```
+>
+> Then use `omnimesh` instead of `npx omnimesh` in the steps below, from your own app's folder.
+
 ### 1. Initialize OmniMesh in your repo
 ```bash
 npx omnimesh init
