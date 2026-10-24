@@ -137,8 +137,26 @@ export interface IdempotencyOptions {
   lockTtlSeconds?: number;
 }
 
+/**
+ * Pick the store when none is passed. Keys must live in storage shared by every node:
+ * with per-process memory, a router failover retry lands on a node that has never seen
+ * the key and runs the write (e.g. a payment) a second time.
+ */
+function resolveDefaultStore(): IdempotencyStore {
+  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+    return new UpstashRedisIdempotencyStore();
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      '[OmniMesh] idempotency() needs a shared store in production: set UPSTASH_REDIS_REST_URL and ' +
+      'UPSTASH_REDIS_REST_TOKEN, or pass { store }. Per-process memory would let failover retries run twice.'
+    );
+  }
+  return new MemoryIdempotencyStore();
+}
+
 export function idempotency(options: IdempotencyOptions = {}) {
-  const store = options.store || new MemoryIdempotencyStore();
+  const store = options.store || resolveDefaultStore();
   const ttlSeconds = options.ttlSeconds || 86400; // 24 hours
   const lockTtlSeconds = options.lockTtlSeconds || 30;
 

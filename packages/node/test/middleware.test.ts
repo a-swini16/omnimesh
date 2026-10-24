@@ -169,4 +169,37 @@ describe('@omnimesh/node Middleware Suite', () => {
       expect(() => new UpstashRedisIdempotencyStore('', '')).toThrow(/required/);
     });
   });
+
+  describe('[C-1] idempotency store must be shared across nodes', () => {
+    it('refuses the per-process memory default in production (a failover retry would charge twice)', () => {
+      const prev = process.env.NODE_ENV;
+      const prevUrl = process.env.UPSTASH_REDIS_REST_URL;
+      process.env.NODE_ENV = 'production';
+      delete process.env.UPSTASH_REDIS_REST_URL;
+      try {
+        expect(() => idempotency()).toThrow(/shared/);
+      } finally {
+        process.env.NODE_ENV = prev;
+        if (prevUrl !== undefined) process.env.UPSTASH_REDIS_REST_URL = prevUrl;
+      }
+    });
+
+    it('two nodes sharing one store run a retried write exactly once', async () => {
+      const store = new MemoryIdempotencyStore(); // stands in for shared Redis
+      let writes = 0;
+      const makeNode = () => {
+        const app = new Hono();
+        app.use('*', idempotency({ store }));
+        app.post('/api/pay', (c) => { writes++; return c.json({ ok: true }, 201); });
+        return app;
+      };
+      const nodeA = makeNode();
+      const nodeB = makeNode();
+      const req = { method: 'POST', headers: { 'Idempotency-Key': 'pay-1' }, body: '{"amount":50}' };
+      await nodeA.request('/api/pay', req);
+      const retry = await nodeB.request('/api/pay', req); // router failover lands on node B
+      expect(retry.headers.get('X-Omni-Idempotent-Replay')).toBe('true');
+      expect(writes).toBe(1);
+    });
+  });
 });
