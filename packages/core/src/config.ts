@@ -60,6 +60,8 @@ export const OmniMeshConfigSchema = z.object({
       maxBufferBytes: 1048576,
       healthCheckIntervalSeconds: 60,
     }),
+  // Pool for paths that match no prefix. Defaults to '/api' (architecture §5); null answers 404 instead.
+  defaultPool: z.string().nullable().optional(),
   pools: z
     .record(z.string(), z.array(CandidateNodeSchema))
     .default({

@@ -172,6 +172,7 @@ export function createRouterApp(options: RouterOptions) {
     });
   }
   const prefixes = Object.keys(pools);
+  const defaultPool = config.defaultPool === undefined ? '/api' : config.defaultPool;
   const internalOrigins = new Set(Object.values(pools).flat().map((n) => new URL(n.url).origin));
   /** Map an absolute URL on any mesh node onto the public origin; null when it is not internal. */
   const toPublic = (publicOrigin: string) => (value: string): string | null => {
@@ -227,9 +228,17 @@ export function createRouterApp(options: RouterOptions) {
       }
     }
 
-    // 1. Resolve matching pool by longest segment-aligned prefix
-    const matchedPrefix = matchPool(pathname, prefixes) ?? (pools['/api'] ? '/api' : undefined);
-    const candidates = matchedPrefix ? pools[matchedPrefix] : [];
+    // Router-owned namespace: never forwarded to nodes
+    if (pathname === '/_omnimesh' || pathname.startsWith('/_omnimesh/')) {
+      return c.json({ error: 'Not Found', code: 'ERR_NO_ROUTE' }, 404);
+    }
+
+    // 1. Resolve matching pool by longest segment-aligned prefix, else the configured default pool
+    const matchedPrefix = matchPool(pathname, prefixes) ?? (defaultPool && pools[defaultPool] ? defaultPool : undefined);
+    if (!matchedPrefix) {
+      return c.json({ error: 'Not Found', code: 'ERR_NO_ROUTE' }, 404);
+    }
+    const candidates = pools[matchedPrefix];
     if (!candidates || candidates.length === 0) {
       return c.json({ error: 'No upstream configured for this path.', code: 'ERR_NO_POOL_CANDIDATES' }, 502);
     }

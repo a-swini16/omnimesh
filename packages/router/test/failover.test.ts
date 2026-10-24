@@ -348,6 +348,25 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
       rateLimit: { enabled: false, requestsPerMinute: 120 },
     });
 
+    it('[M-3] defaultPool: null sends unmatched paths (incl. traversal tricks) to 404, never to a node', async () => {
+      const cfg = baseConfig();
+      (cfg as any).defaultPool = null;
+      const router = createRouterApp({ config: cfg, gatewaySecret: TEST_SECRET });
+      for (const path of ['/admin', '/api/../admin', '/api/%2e%2e/admin', '/API/data', '/apiX/data']) {
+        const res = await router.request(path);
+        expect(res.status, path).toBe(404);
+        expect(((await res.json()) as any).code, path).toBe('ERR_NO_ROUTE');
+      }
+      expect((await router.request('/api/data')).status).toBe(200);
+    });
+
+    it('[M-3] router-reserved /_omnimesh/* paths are never proxied to nodes', async () => {
+      const router = createRouterApp({ config: baseConfig(), gatewaySecret: TEST_SECRET });
+      const res = await router.request('/_omnimesh/debug');
+      expect(res.status).toBe(404);
+      expect(res.headers.get('X-Omni-Node')).toBeNull();
+    });
+
     it('[M-1] rewrites redirects to a node\'s own URL onto the public domain', async () => {
       const router = createRouterApp({ config: baseConfig(), gatewaySecret: TEST_SECRET });
       const res = await router.request('https://api.mesh.local/api/redirect');
