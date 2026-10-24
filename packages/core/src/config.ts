@@ -48,8 +48,8 @@ export const OmniMeshConfigSchema = z.object({
       healthCheckIntervalSeconds: z.number().int().positive().default(60),
       // priority: config order (failover only). weighted: spread load across healthy non-backup nodes by weight.
       strategy: z.enum(['priority', 'weighted']).optional(),
-      // Consecutive app-level 5xx (e.g. 500) before a node's circuit opens. Timeouts,
-      // connection errors, 429, 502, 503 and 504 open it immediately.
+      // Deprecated and ignored: app-level 5xx no longer open a circuit (only timeouts, connection
+      // errors, 429 and 502-504 do). Kept so existing configs still validate.
       failureThreshold: z.number().int().min(1).max(20).optional(),
     })
     .default({

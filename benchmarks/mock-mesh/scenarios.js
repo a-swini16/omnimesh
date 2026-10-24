@@ -130,16 +130,18 @@ export function flashSale() {
 }
 
 export function badInput() {
-  const big = 'x'.repeat(5 * 1024 * 1024);
+  const big = 'x'.repeat(11 * 1024 * 1024); // over the 10 MB default maxBodyBytes
   const huge = hit('POST', '/api/items', big, { headers: { 'Content-Type': 'application/json' } });
-  console.log(`5 MB body -> ${huge.status} ${String(huge.body).slice(0, 120)}`);
-  check(huge, { '5 MB body rejected with 413': (r) => r.status === 413 });
+  console.log(`11 MB body -> ${huge.status} ${String(huge.body).slice(0, 120)}`);
+  check(huge, { '11 MB body (over the 10 MB cap) rejected with 413': (r) => r.status === 413 });
 
   for (let i = 0; i < 10; i++) {
     const r = hit('POST', '/api/items', '{"broken', { headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `bad-${i}` } });
     if (i === 0) console.log(`malformed JSON -> ${r.status} attempts=${r.headers['X-Omni-Attempts']} ${String(r.body).slice(0, 120)}`);
     check(r, { 'malformed JSON gets a 4xx, not a 5xx': (x) => x.status >= 400 && x.status < 500 });
   }
+
+  for (let i = 0; i < 30; i++) hit('GET', '/api/buggy');
 
   let ok = 0;
   const servedBy = {};
@@ -149,6 +151,7 @@ export function badInput() {
     servedBy[`${r.headers['X-Omni-Node']}/attempts=${r.headers['X-Omni-Attempts']}`] = (servedBy[`${r.headers['X-Omni-Node']}/attempts=${r.headers['X-Omni-Attempts']}`] || 0) + 1;
   }
   console.log(`reads after attack: ${JSON.stringify(servedBy)}`);
+  check(servedBy, { 'primary still serves first try (no circuit opened by app errors)': (m) => m['koyeb/attempts=1'] === 100 });
   check(ok, { 'normal reads still all succeed after the attack': (n) => n === 100 });
 }
 

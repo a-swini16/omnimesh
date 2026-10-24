@@ -9,7 +9,7 @@
  */
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
-import { gatewayAuth, idempotency, MemoryIdempotencyStore, healthHandler } from '@omnimesh/node';
+import { gatewayAuth, idempotency, MemoryIdempotencyStore, healthHandler, omniErrorHandler } from '@omnimesh/node';
 
 const SECRET = process.env.GATEWAY_SECRET;
 if (!SECRET) throw new Error('GATEWAY_SECRET is required');
@@ -30,6 +30,7 @@ function createNode(name: string) {
   let served = 0;
   const app = new Hono();
 
+  app.onError(omniErrorHandler);
   app.use('*', gatewayAuth({ secret: SECRET }));
   app.get('/health', healthHandler({ providerId: name }));
   app.post('/__mock/mode', async (c) => {
@@ -59,11 +60,13 @@ function createNode(name: string) {
   });
 
   app.get('/api/data', (c) => c.json({ node: name }));
+  // An endpoint with a bug: always 500, like an unhandled exception
+  app.get('/api/buggy', (c) => c.json({ error: 'bug' }, 500));
 
   // A typical app endpoint: returns the caller's own data and sets no cache headers
   app.get('/api/me', (c) => c.json({ user: (c.req.header('authorization') || '').replace('Bearer ', ''), node: name }));
 
-  // Mirrors examples/rest-api: parses JSON without guarding against malformed input
+  // Mirrors examples/rest-api: parses JSON directly; omniErrorHandler turns malformed input into 400
   app.post('/api/items', async (c) => c.json({ received: await c.req.json(), node: name }, 201));
 
   app.post('/api/orders', idempotency({ store: sharedStore }), (c) => {

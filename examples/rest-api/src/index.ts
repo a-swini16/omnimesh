@@ -1,8 +1,9 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
-import { gatewayAuth, idempotency, healthHandler } from '@omnimesh/node';
+import { gatewayAuth, idempotency, healthHandler, omniErrorHandler } from '@omnimesh/node';
 
 const app = new Hono();
+app.onError(omniErrorHandler);
 
 // 1. Enforce Fail-Closed Gateway Authentication (blocks direct bypass)
 app.use('*', gatewayAuth());

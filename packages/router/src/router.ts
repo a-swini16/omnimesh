@@ -36,6 +36,18 @@ interface Candidate {
 
 // Statuses that mean the node or its provider is down/out of quota, not that one endpoint is buggy
 const HARD_FAILURE_STATUSES = new Set([429, 502, 503, 504]);
+// Methods whose app-level 5xx may be retried on another node
+const READ_METHODS = new Set(['GET', 'HEAD']);
+
+/** Copy the upstream response and attach OmniMesh telemetry (labels only, never upstream URLs). */
+function withTelemetry(response: Response, node: Candidate, attempts: number, latencyMs: number): Response {
+  const headers = new Headers(response.headers);
+  headers.delete('x-gateway-secret');
+  headers.set('X-Omni-Node', node.label);
+  headers.set('X-Omni-Attempts', String(attempts));
+  headers.set('X-Omni-Latency-Ms', String(latencyMs));
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
 
 /**
  * Weighted random order without replacement (Efraimidis-Spirakis): each node gets
@@ -87,9 +99,6 @@ export function createRouterApp(options: RouterOptions) {
   const statusToken = options.statusToken || readEnv('OMNIMESH_STATUS_TOKEN');
   const random = options.random || Math.random;
   const strategy = config.router.strategy ?? 'priority';
-  const failureThreshold = config.router.failureThreshold ?? 3;
-  // Consecutive soft (app-level 5xx) failures per node, counted per router instance
-  const softFailures = new Map<string, number>();
 
   // Validate gateway secret fail-closed
   const gatewaySecret = options.gatewaySecret || config.gatewaySecret || readEnv('GATEWAY_SECRET');
@@ -258,20 +267,21 @@ export function createRouterApp(options: RouterOptions) {
           timeoutForThisAttempt
         );
 
-        // Treat 5xx and 429 as node failures to trigger failover
-        if (response.status >= 500 || response.status === 429) {
+        // Provider-level failures (429, 502-504) mean the node is down or out of quota: open its circuit.
+        // Other 5xx (e.g. 500) are the app's own answer, often to bad input from one client, so they never
+        // open a circuit; otherwise ~10 malformed requests could mark every node dead.
+        const isHardFailure = HARD_FAILURE_STATUSES.has(response.status);
+        if (isHardFailure || response.status >= 500) {
+          lastFailure = `HTTP_${response.status}`;
+
+          if (!isHardFailure && !READ_METHODS.has(bufferedReq.method)) {
+            // An app error on a write is final: pass it through unchanged instead of replaying it on more nodes
+            return withTelemetry(response, node, attempts, Date.now() - startTime);
+          }
+
           // Release the connection; we are not going to read this body
           await response.body?.cancel().catch(() => {});
-          lastFailure = `HTTP_${response.status}`;
-          // A plain 500 is often one buggy endpoint: only open the circuit after repeated failures,
-          // otherwise a single bad route could mark every node in the pool dead
-          const failures = (softFailures.get(node.url) ?? 0) + 1;
-          if (HARD_FAILURE_STATUSES.has(response.status) || failures >= failureThreshold) {
-            softFailures.delete(node.url);
-            await healthStore.markNodeDead(node.url, lastFailure);
-          } else {
-            softFailures.set(node.url, failures);
-          }
+          if (isHardFailure) await healthStore.markNodeDead(node.url, lastFailure);
 
           // CRITICAL SAFETY CHECK: If mutating request without Idempotency-Key, DO NOT retry!
           if (!bufferedReq.canRetry) {
@@ -291,22 +301,10 @@ export function createRouterApp(options: RouterOptions) {
 
         // SUCCESS! (200-499 excluding 429)
         const latency = Date.now() - startTime;
-        softFailures.delete(node.url);
         await healthStore.markNodeHealthy(node.url, latency);
         if (node.quota) await quotaTracker.recordRequest(node.quotaKey);
 
-        // Copy response headers and attach OmniMesh telemetry (labels only, never upstream URLs)
-        const resHeaders = new Headers(response.headers);
-        resHeaders.delete('x-gateway-secret');
-        resHeaders.set('X-Omni-Node', node.label);
-        resHeaders.set('X-Omni-Attempts', String(attempts));
-        resHeaders.set('X-Omni-Latency-Ms', String(latency));
-
-        return new Response(response.body, {
-          status: response.status,
-          statusText: response.statusText,
-          headers: resHeaders,
-        });
+        return withTelemetry(response, node, attempts, latency);
       } catch (err: any) {
         // Network timeout, connection refused, or DNS failure
         const isTimeout = err.name === 'AbortError' || err.name === 'TimeoutError' || err.message?.includes('aborted');

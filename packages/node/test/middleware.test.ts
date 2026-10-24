@@ -10,6 +10,7 @@ import {
   MemoryIdempotencyStore,
   UpstashRedisIdempotencyStore,
   healthHandler,
+  omniErrorHandler,
 } from '../src/index.js';
 
 const TEST_SECRET = 'a'.repeat(32); // 32 characters secure secret
@@ -217,5 +218,20 @@ describe('@omnimesh/node Middleware Suite', () => {
     expect(reused.status).toBe(422);
     expect(((await reused.json()) as any).code).toBe('ERR_IDEMPOTENCY_KEY_REUSED');
     expect(orders).toBe(1);
+  });
+
+  it('[H-7] omniErrorHandler turns malformed JSON into 400 and hides internal errors', async () => {
+    const app = new Hono();
+    app.onError(omniErrorHandler);
+    app.post('/api/items', async (c) => c.json(await c.req.json(), 201));
+    app.get('/api/crash', () => { throw new Error('db password=hunter2 at 10.0.0.5'); });
+
+    const bad = await app.request('/api/items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"broken' });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as any).code).toBe('ERR_BAD_JSON');
+
+    const crash = await app.request('/api/crash');
+    expect(crash.status).toBe(500);
+    expect(await crash.text()).not.toContain('hunter2');
   });
 });

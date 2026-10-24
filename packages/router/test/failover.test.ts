@@ -35,6 +35,7 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
       return c.json({ source: 'node1-primary', message: 'Hello from Node 1' });
     });
     app1.get('/api/buggy', (c) => c.text('bug in one endpoint', 500));
+    app1.post('/api/buggy', (c) => c.json({ error: 'app error' }, 500));
     app1.post('/api/orders', (c) => {
       if (node1ShouldFail) {
         return c.text('Primary node crashed during order', 503);
@@ -449,20 +450,28 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
       expect((await primaryDown.request('/api/data')).headers.get('X-Omni-Node')).toBe('node-2');
     });
 
-    it('a single buggy endpoint (HTTP 500) does not open the circuit until the threshold', async () => {
+    it('[H-7] app 500s are retried for GET but never open a node\'s circuit', async () => {
       node1ShouldFail = false;
-      const router = createRouterApp({ config: cfg([url1, url3], { failureThreshold: 3 }), gatewaySecret: TEST_SECRET });
+      const router = createRouterApp({ config: cfg([url1, url3]), gatewaySecret: TEST_SECRET });
 
-      await router.request('/api/buggy');
-      await router.request('/api/buggy');
-      // Two soft failures: node 1 still serves healthy routes
-      expect((await router.request('/api/data')).headers.get('X-Omni-Node')).toBe('node-1');
+      // node 1 answers 500, node 2 has no such route (404): the GET is retried once
+      const first = await router.request('/api/buggy');
+      expect(first.headers.get('X-Omni-Attempts')).toBe('2');
+      for (let i = 0; i < 20; i++) await router.request('/api/buggy');
 
-      // A success reset the count, so three more consecutive failures are needed to trip it
-      for (let i = 0; i < 3; i++) await router.request('/api/buggy');
+      // A flood of app errors (e.g. from malformed input) must not take node 1 out of rotation
       const res = await router.request('/api/data');
-      expect(res.headers.get('X-Omni-Node')).toBe('node-2');
+      expect(res.headers.get('X-Omni-Node')).toBe('node-1');
       expect(res.headers.get('X-Omni-Attempts')).toBe('1');
+    });
+
+    it('[H-7] app 500 on a write is passed through as-is, not retried (no 3x amplification)', async () => {
+      node1ShouldFail = false;
+      const router = createRouterApp({ config: cfg([url1, url3]), gatewaySecret: TEST_SECRET });
+      const res = await router.request('/api/buggy', { method: 'POST', headers: { 'Idempotency-Key': 'k-500' }, body: '{}' });
+      expect(res.status).toBe(500);
+      expect(res.headers.get('X-Omni-Attempts')).toBe('1');
+      expect(((await res.json()) as any).error).toBe('app error');
     });
 
     it('moves traffic to the next free tier before a provider quota runs out', async () => {
