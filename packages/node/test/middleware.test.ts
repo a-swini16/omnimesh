@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
 import {
   gatewayAuth,
+  expressGatewayAuth,
   validateGatewaySecretOrThrow,
   signJwt,
   verifyJwt,
@@ -233,5 +234,43 @@ describe('@omnimesh/node Middleware Suite', () => {
     const crash = await app.request('/api/crash');
     expect(crash.status).toBe(500);
     expect(await crash.text()).not.toContain('hunter2');
+  });
+
+  describe('[M-2] gateway secret rotation', () => {
+    const CURRENT = 'c'.repeat(32);
+    const PREVIOUS = 'p'.repeat(32);
+    const app = () => {
+      const a = new Hono();
+      a.use('*', gatewayAuth({ secret: CURRENT, previousSecrets: [PREVIOUS] }));
+      a.get('/x', (c) => c.text('ok'));
+      return a;
+    };
+    const call = (secret: string) => app().request('/x', { headers: { 'X-Gateway-Secret': secret } });
+
+    it('accepts the current and the previous secret during a rotation window, nothing else', async () => {
+      expect((await call(CURRENT)).status).toBe(200);
+      expect((await call(PREVIOUS)).status).toBe(200);
+      expect((await call('z'.repeat(32))).status).toBe(403);
+    });
+
+    it('reads GATEWAY_SECRET_PREVIOUS from the environment and rejects weak previous secrets', async () => {
+      process.env.GATEWAY_SECRET_PREVIOUS = PREVIOUS;
+      try {
+        const a = new Hono();
+        a.use('*', gatewayAuth({ secret: CURRENT }));
+        a.get('/x', (c) => c.text('ok'));
+        expect((await a.request('/x', { headers: { 'X-Gateway-Secret': PREVIOUS } })).status).toBe(200);
+      } finally {
+        delete process.env.GATEWAY_SECRET_PREVIOUS;
+      }
+      expect(() => gatewayAuth({ secret: CURRENT, previousSecrets: ['short'] })).toThrow(/32/);
+    });
+
+    it('the Express middleware supports rotation too', () => {
+      const mw = expressGatewayAuth({ secret: CURRENT, previousSecrets: [PREVIOUS] });
+      let passed = false;
+      mw({ headers: { 'x-gateway-secret': PREVIOUS } }, { status: () => ({ json: () => {} }) }, () => { passed = true; });
+      expect(passed).toBe(true);
+    });
   });
 });

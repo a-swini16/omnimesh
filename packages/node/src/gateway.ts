@@ -2,7 +2,27 @@ import type { Context, Next } from 'hono';
 
 export interface GatewayAuthOptions {
   secret?: string;
+  /**
+   * Secrets still accepted while a rotation is in progress (default: GATEWAY_SECRET_PREVIOUS, comma-separated).
+   * Rotate by deploying nodes with the new secret plus the old one here, then the router, then removing the old one.
+   */
+  previousSecrets?: string[];
   headerName?: string;
+}
+
+/** Current secret plus any previous ones, all validated as strong. */
+function acceptedSecrets(options: GatewayAuthOptions): string[] {
+  const previous =
+    options.previousSecrets ??
+    (process.env.GATEWAY_SECRET_PREVIOUS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return [validateGatewaySecretOrThrow(options.secret), ...previous.map((p) => validateGatewaySecretOrThrow(p))];
+}
+
+/** Compares against every accepted secret without stopping early, so timing reveals nothing. */
+function matchesAny(provided: string, secrets: string[]): boolean {
+  let ok = false;
+  for (const secret of secrets) ok = timingSafeEqual(provided, secret) || ok;
+  return ok;
 }
 
 /**
@@ -40,14 +60,14 @@ export function timingSafeEqual(a: string, b: string): boolean {
  * Unauthenticated requests are immediately blocked with 403 Forbidden.
  */
 export function gatewayAuth(options: GatewayAuthOptions = {}) {
-  const secret = validateGatewaySecretOrThrow(options.secret);
+  const secrets = acceptedSecrets(options);
   const headerName = (options.headerName || 'X-Gateway-Secret').toLowerCase();
 
   return async function gatewayAuthMiddleware(c: Context, next: Next) {
     // Standard bypass for health checks if explicitly allowed or check header
     const providedSecret = c.req.header(headerName);
 
-    if (!providedSecret || !timingSafeEqual(providedSecret, secret)) {
+    if (!providedSecret || !matchesAny(providedSecret, secrets)) {
       return c.json(
         {
           error: 'Forbidden: Missing or invalid origin authentication header.',
@@ -66,12 +86,12 @@ export function gatewayAuth(options: GatewayAuthOptions = {}) {
  * Express / Connect compatible middleware for X-Gateway-Secret verification.
  */
 export function expressGatewayAuth(options: GatewayAuthOptions = {}) {
-  const secret = validateGatewaySecretOrThrow(options.secret);
+  const secrets = acceptedSecrets(options);
   const headerName = (options.headerName || 'x-gateway-secret').toLowerCase();
 
   return function expressGatewayAuthMiddleware(req: any, res: any, next: any) {
     const provided = req.headers[headerName];
-    if (typeof provided !== 'string' || !timingSafeEqual(provided, secret)) {
+    if (typeof provided !== 'string' || !matchesAny(provided, secrets)) {
       return res.status(403).json({
         error: 'Forbidden: Missing or invalid origin authentication header.',
         code: 'ERR_GATEWAY_SECRET_INVALID',

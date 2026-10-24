@@ -26,6 +26,15 @@ OmniMesh is engineered with a strict **fail-closed** security architecture:
    * Secrets and tokens are never logged or exposed in telemetry.
    * Automated `.gitignore` inspection protects `.env` files from accidental commits.
 
+### Rotating the gateway secret without downtime
+
+1. Generate a new secret: `openssl rand -hex 32`.
+2. On **every compute node**, set `GATEWAY_SECRET=<new>` and `GATEWAY_SECRET_PREVIOUS=<old>`, then redeploy. Nodes now accept both.
+3. Set `GATEWAY_SECRET=<new>` on the **router** (`npx wrangler secret put GATEWAY_SECRET`). It sends only the new one.
+4. Once the router is live, remove `GATEWAY_SECRET_PREVIOUS` from the nodes and redeploy them.
+
+If the old secret leaked, keep step 4's window as short as possible.
+
 ---
 
 ## 🚨 Reporting a Vulnerability

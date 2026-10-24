@@ -119,6 +119,8 @@ export async function runInit(options: InitOptions = {}) {
 # Generated on ${new Date().toISOString()}
 OMNIMESH_DOMAIN="${domain}"
 GATEWAY_SECRET="${gatewaySecret}"
+# During a secret rotation only: the old secret, still accepted by nodes (see SECURITY.md)
+GATEWAY_SECRET_PREVIOUS=""
 JWT_SECRET="${jwtSecret}"
 
 # Provider Tokens (fill in as you sign up)
