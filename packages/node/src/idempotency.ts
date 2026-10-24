@@ -4,6 +4,8 @@ export interface StoredResponse {
   status: number;
   headers: Record<string, string>;
   body: string;
+  /** SHA-256 of the original request body, so a reused key with a different payload is caught */
+  requestHash?: string;
 }
 
 export interface IdempotencyStore {
@@ -172,10 +174,23 @@ export function idempotency(options: IdempotencyOptions = {}) {
     // Scope the key to caller + route so one client cannot replay another client's stored response
     const caller = c.req.header('authorization') || '';
     const key = await sha256Hex(`${c.req.method}\n${c.req.path}\n${caller}\n${rawKey}`);
+    // Hono caches the body, so the handler can still read it afterwards
+    const requestHash = await sha256Hex(await c.req.text());
+    const reusedWithDifferentBody = (stored: StoredResponse) =>
+      stored.requestHash !== undefined && stored.requestHash !== requestHash;
+    const keyReused = () =>
+      c.json(
+        {
+          error: 'This Idempotency-Key was already used with a different request body. Use a new key for a new request.',
+          code: 'ERR_IDEMPOTENCY_KEY_REUSED',
+        },
+        422
+      );
 
     // Check if result already cached
     const cached = await store.get(key);
     if (cached) {
+      if (reusedWithDifferentBody(cached)) return keyReused();
       c.header('X-Omni-Idempotent-Replay', 'true');
       for (const [headerKey, headerVal] of Object.entries(cached.headers)) {
         if (!['content-length', 'transfer-encoding'].includes(headerKey.toLowerCase())) {
@@ -203,6 +218,7 @@ export function idempotency(options: IdempotencyOptions = {}) {
       const finished = await store.get(key);
       if (finished) {
         await store.unlock(key);
+        if (reusedWithDifferentBody(finished)) return keyReused();
         c.header('X-Omni-Idempotent-Replay', 'true');
         return c.newResponse(finished.body, finished.status as any);
       }
@@ -220,7 +236,7 @@ export function idempotency(options: IdempotencyOptions = {}) {
           if (k.toLowerCase() !== 'set-cookie') headers[k] = v;
         });
 
-        await store.set(key, { status, headers, body: bodyText }, ttlSeconds);
+        await store.set(key, { status, headers, body: bodyText, requestHash }, ttlSeconds);
       } else {
         await store.unlock(key);
       }

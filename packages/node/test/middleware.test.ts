@@ -202,4 +202,20 @@ describe('@omnimesh/node Middleware Suite', () => {
       expect(writes).toBe(1);
     });
   });
+
+  it('[H-1] rejects the same Idempotency-Key with a different body instead of replaying', async () => {
+    const app = new Hono();
+    let orders = 0;
+    app.use('*', idempotency({ store: new MemoryIdempotencyStore() }));
+    app.post('/api/orders', async (c) => { orders++; return c.json(await c.req.json(), 201); });
+    const send = (body: string) =>
+      app.request('/api/orders', { method: 'POST', headers: { 'Idempotency-Key': 'o-1', 'Content-Type': 'application/json' }, body });
+
+    expect((await send('{"item":"phone"}')).status).toBe(201);
+    expect((await send('{"item":"phone"}')).headers.get('X-Omni-Idempotent-Replay')).toBe('true');
+    const reused = await send('{"item":"laptop"}');
+    expect(reused.status).toBe(422);
+    expect(((await reused.json()) as any).code).toBe('ERR_IDEMPOTENCY_KEY_REUSED');
+    expect(orders).toBe(1);
+  });
 });
