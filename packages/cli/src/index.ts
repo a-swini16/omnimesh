@@ -30,11 +30,13 @@ export function createProgram() {
     .option('--with-card', 'Initialize including card-verified tiers (Oracle Always Free, Cloudflare R2)')
     .option('--domain <domain>', 'Set custom frontend domain (default: a placeholder you must replace)')
     .option('-q, --quick', 'Non-interactive fast setup using sensible defaults')
+    .option('--force', 'Overwrite an existing omnimesh.config.yaml')
+    .option('--keep-alive', 'Also generate a keep-alive workflow (check provider terms first)')
     .action(async (opts) => {
       let card: boolean | undefined = undefined;
       if (opts.noCard) card = false;
       if (opts.withCard) card = true;
-      await runInit({ card, domain: opts.domain, quick: opts.quick });
+      if ((await runInit({ card, domain: opts.domain, quick: opts.quick, force: opts.force, keepAlive: opts.keepAlive })) === false) process.exitCode = 1;
     });
 
   program

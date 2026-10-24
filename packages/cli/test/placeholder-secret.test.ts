@@ -55,6 +55,7 @@ describe('[C-2] the gateway secret never goes to placeholder hosts', () => {
 
   it('the keep-alive workflow never sends the gateway secret', async () => {
     await freshInit();
+    await runInit({ cwd: dir, quick: true, card: false, force: true, keepAlive: true });
     const wf = fs.readFileSync(path.join(dir, '.github/workflows/keep-alive.yml'), 'utf-8');
     expect(wf).not.toMatch(/GATEWAY_SECRET/);
   });

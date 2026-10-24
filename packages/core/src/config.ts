@@ -218,7 +218,8 @@ export function generateDefaultConfig(profile: 'no-card' | 'with-card' = 'no-car
         provider: 'supabase',
       },
       keepAlive: {
-        enabled: true,
+        // Off by default: pinging free services to stop them sleeping may break their terms (architecture §8)
+        enabled: false,
         intervalMinutes: 14,
         targets: ['https://core-api.onrender.com.replace-me.invalid/health', 'https://core-api.koyeb.app.replace-me.invalid/health'],
       },

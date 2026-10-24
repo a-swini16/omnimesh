@@ -33,7 +33,7 @@ describe('OmniMesh CLI Suite (init, doctor, deploy, chaos, add/remove)', () => {
 
     expect(fs.existsSync(configPath)).toBe(true);
     expect(fs.existsSync(envPath)).toBe(true);
-    expect(fs.existsSync(keepAlivePath)).toBe(true);
+    expect(fs.existsSync(keepAlivePath)).toBe(false); // keep-alive is opt-in (architecture §8)
 
     const configContent = fs.readFileSync(configPath, 'utf-8');
     const parsed = parseOmniMeshConfigYaml(configContent);
@@ -105,5 +105,28 @@ describe('OmniMesh CLI Suite (init, doctor, deploy, chaos, add/remove)', () => {
     );
     fs.writeFileSync(path.join(tmpDir, '.env'), `GATEWAY_SECRET="${'s'.repeat(64)}"\n`);
     expect(await runDoctor({ cwd: tmpDir })).toBe(false);
+  });
+
+  it('[M-7] init never overwrites an existing config unless forced', async () => {
+    expect(await runInit({ cwd: tmpDir, quick: true, card: false })).toBe(true);
+    const configPath = path.join(tmpDir, 'omnimesh.config.yaml');
+    fs.appendFileSync(configPath, '# my edits\n');
+
+    expect(await runInit({ cwd: tmpDir, quick: true, card: false })).toBe(false);
+    expect(fs.readFileSync(configPath, 'utf-8')).toContain('# my edits');
+
+    expect(await runInit({ cwd: tmpDir, quick: true, card: false, force: true })).toBe(true);
+    expect(fs.readFileSync(configPath, 'utf-8')).not.toContain('# my edits');
+  });
+
+  it('[M-7] keep-alive is off by default and opt-in with a terms-of-service warning', async () => {
+    await runInit({ cwd: tmpDir, quick: true, card: false });
+    const config = parseOmniMeshConfigYaml(fs.readFileSync(path.join(tmpDir, 'omnimesh.config.yaml'), 'utf-8'));
+    expect(config.keepAlive.enabled).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.github/workflows/keep-alive.yml'))).toBe(false);
+
+    await runInit({ cwd: tmpDir, quick: true, card: false, force: true, keepAlive: true });
+    const wf = fs.readFileSync(path.join(tmpDir, '.github/workflows/keep-alive.yml'), 'utf-8');
+    expect(wf).toMatch(/terms of service/i);
   });
 });

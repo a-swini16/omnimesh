@@ -15,6 +15,10 @@ export interface InitOptions {
   domain?: string;
   quick?: boolean;
   cwd?: string;
+  /** Overwrite an existing omnimesh.config.yaml */
+  force?: boolean;
+  /** Generate the keep-alive workflow (off by default; check each provider's terms first) */
+  keepAlive?: boolean;
 }
 
 // Hostname suffix -> provider id, used to attach each provider's free-tier quota to its nodes
@@ -52,8 +56,13 @@ export function attachProviderQuotas(config: OmniMeshConfig): OmniMeshConfig {
   return config;
 }
 
-export async function runInit(options: InitOptions = {}) {
+export async function runInit(options: InitOptions = {}): Promise<boolean> {
   const cwd = options.cwd || process.cwd();
+  const existingConfig = path.join(cwd, 'omnimesh.config.yaml');
+  if (fs.existsSync(existingConfig) && !options.force) {
+    console.log(pc.red('✖ omnimesh.config.yaml already exists. Re-run with --force to overwrite it (your edits will be lost).'));
+    return false;
+  }
   console.log(pc.bold(pc.cyan('\n🌐 Welcome to OmniMesh Setup Wizard')));
   console.log(pc.dim('“Your free tiers, merged into one resilient cloud.”\n'));
 
@@ -102,6 +111,7 @@ export async function runInit(options: InitOptions = {}) {
   const profile = hasCard ? 'with-card' : 'no-card';
   const config: OmniMeshConfig = attachProviderQuotas(generateDefaultConfig(profile));
   config.domain = domain;
+  config.keepAlive.enabled = Boolean(options.keepAlive);
   // The secret lives only in .env: omnimesh.config.yaml is meant to be committed
 
   // 3. Write omnimesh.config.yaml
@@ -160,13 +170,29 @@ ${hasCard ? 'CF_TUNNEL_TOKEN=""\nORACLE_HOST=""\nR2_ACCESS_KEY_ID=""\nR2_SECRET_
     }
   }
 
-  // 6. Keep-Alive Engine: Provision GitHub Actions workflow for keeping Render & Koyeb awake!
+  // 6. Keep-Alive workflow: opt-in only, because pinging free services to keep them awake may break their terms
+  if (options.keepAlive) writeKeepAliveWorkflow(cwd, domain);
+  else console.log(pc.dim('ℹ Keep-alive is off (Render free services sleep after 15 min idle). Enable with --keep-alive after checking each provider\'s terms.'));
+
+  console.log(pc.bold(pc.cyan('\n✨ OmniMesh initialized successfully!')));
+  console.log(`Next steps:`);
+  console.log(`  1. Replace the placeholder URLs in ${pc.bold('omnimesh.config.yaml')} with your deployed apps`);
+  console.log(`  2. Add tokens to ${pc.bold('.env')}`);
+  console.log(`  3. Run ${pc.bold(pc.yellow('omnimesh doctor'))} to verify credentials and limits`);
+  console.log(`  4. Run ${pc.bold(pc.yellow('omnimesh deploy'))} to verify every node is healthy`);
+  console.log(`  5. Run ${pc.bold(pc.yellow('omnimesh chaos'))} to watch sub-3s failover live!\n`);
+  return true;
+}
+
+function writeKeepAliveWorkflow(cwd: string, domain: string): void {
   const workflowDir = path.join(cwd, '.github', 'workflows');
   fs.mkdirSync(workflowDir, { recursive: true });
   const keepAliveWorkflowPath = path.join(workflowDir, 'keep-alive.yml');
 
   const keepAliveWorkflow = `name: OmniMesh Node Keep-Alive
-# Pings Render and Koyeb standby containers every 14 minutes to prevent cold-sleep
+# Pings your router every 14 minutes so sleeping standby containers stay warm.
+# WARNING: check each provider's terms of service first; some forbid keep-alive pings on free plans.
+# Delete this file to turn keep-alive off.
 on:
   schedule:
     - cron: '*/14 * * * *'
@@ -191,11 +217,4 @@ jobs:
     )
   );
 
-  console.log(pc.bold(pc.cyan('\n✨ OmniMesh initialized successfully!')));
-  console.log(`Next steps:`);
-  console.log(`  1. Review your pools in ${pc.bold('omnimesh.config.yaml')}`);
-  console.log(`  2. Add tokens to ${pc.bold('.env')}`);
-  console.log(`  3. Run ${pc.bold(pc.yellow('omnimesh doctor'))} to verify credentials and limits`);
-  console.log(`  4. Run ${pc.bold(pc.yellow('omnimesh deploy'))} to push across all providers`);
-  console.log(`  5. Run ${pc.bold(pc.yellow('omnimesh chaos'))} to watch sub-3s failover live!\n`);
 }
