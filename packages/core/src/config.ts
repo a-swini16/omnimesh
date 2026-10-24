@@ -9,6 +9,9 @@ export const CandidateNodeSchema = z.union([
     providerId: z.string().optional(),
     weight: z.number().int().min(1).max(100).default(1),
     isBackup: z.boolean().default(false),
+    // Free-tier request quota for this provider account; the router moves traffic away at 95%
+    requestsPerDay: z.number().int().positive().optional(),
+    requestsPerMonth: z.number().int().positive().optional(),
   }),
 ]);
 

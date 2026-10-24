@@ -29,6 +29,9 @@ interface Candidate {
   providerId?: string;
   weight: number;
   isBackup: boolean;
+  /** Key for quota counting: one provider account shares one quota across its deployments */
+  quotaKey: string;
+  quota?: { requestsPerDay?: number; requestsPerMonth?: number };
 }
 
 // Statuses that mean the node or its provider is down/out of quota, not that one endpoint is buggy
@@ -100,11 +103,23 @@ export function createRouterApp(options: RouterOptions) {
       const providerId = typeof n === 'string' ? undefined : n.providerId;
       const weight = typeof n === 'string' ? 1 : n.weight ?? 1;
       const isBackup = typeof n === 'string' ? false : n.isBackup ?? false;
+      const quota =
+        typeof n !== 'string' && (n.requestsPerDay || n.requestsPerMonth)
+          ? { requestsPerDay: n.requestsPerDay, requestsPerMonth: n.requestsPerMonth }
+          : undefined;
       const parsed = new URL(url);
       if (parsed.protocol !== 'https:' && !isLoopback(parsed.hostname)) {
         throw new Error(`[OmniMesh Security Violation] Upstream ${parsed.host} in pool ${prefix} must use https://`);
       }
-      return { url: url.replace(/\/$/, ''), providerId, weight, isBackup, label: providerId || `node-${i + 1}` };
+      return {
+        url: url.replace(/\/$/, ''),
+        providerId,
+        weight,
+        isBackup,
+        quota,
+        quotaKey: providerId || url,
+        label: providerId || `node-${i + 1}`,
+      };
     });
   }
   const prefixes = Object.keys(pools);
@@ -170,7 +185,7 @@ export function createRouterApp(options: RouterOptions) {
     for (const node of candidates) {
       const isHealthy =
         (await healthStore.isNodeHealthy(node.url, circuitTtlMs)) &&
-        (!node.providerId || (await quotaTracker.canAcceptTraffic(node.providerId)));
+        (!node.quota || (await quotaTracker.canAcceptTraffic(node.quotaKey, node.quota)));
       (isHealthy ? healthyCandidates : deadCandidates).push(node);
     }
 
@@ -261,7 +276,7 @@ export function createRouterApp(options: RouterOptions) {
         const latency = Date.now() - startTime;
         softFailures.delete(node.url);
         await healthStore.markNodeHealthy(node.url, latency);
-        if (node.providerId) await quotaTracker.recordRequest(node.providerId);
+        if (node.quota) await quotaTracker.recordRequest(node.quotaKey);
 
         // Copy response headers and attach OmniMesh telemetry (labels only, never upstream URLs)
         const resHeaders = new Headers(response.headers);

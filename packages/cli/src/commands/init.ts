@@ -8,13 +8,48 @@ import {
   stringifyOmniMeshConfigYaml,
   type OmniMeshConfig,
 } from '@omnimesh/core';
-import { getAllProviders } from '@omnimesh/providers';
+import { getAllProviders, getProvider } from '@omnimesh/providers';
 
 export interface InitOptions {
   card?: boolean;
   domain?: string;
   quick?: boolean;
   cwd?: string;
+}
+
+// Hostname suffix -> provider id, used to attach each provider's free-tier quota to its nodes
+const HOST_PROVIDERS: [string, string][] = [
+  ['.koyeb.app', 'koyeb'],
+  ['.onrender.com', 'render'],
+  ['.vercel.app', 'vercel'],
+  ['.netlify.app', 'netlify'],
+  ['.deno.dev', 'deno-deploy'],
+  ['oracle', 'oracle'],
+];
+
+/**
+ * Turn plain pool URLs into nodes tagged with providerId and request quota, so the router
+ * moves traffic to the next free tier before a provider's limit is reached.
+ */
+export function attachProviderQuotas(config: OmniMeshConfig): OmniMeshConfig {
+  for (const [poolPath, nodes] of Object.entries(config.pools)) {
+    config.pools[poolPath] = nodes.map((node) => {
+      if (typeof node !== 'string') return node;
+      const host = new URL(node).hostname;
+      const providerId = HOST_PROVIDERS.find(([suffix]) => host.endsWith(suffix) || host.includes(suffix))?.[1];
+      const limits = providerId ? getProvider(providerId)?.limits : undefined;
+      if (!providerId) return node;
+      return {
+        url: node,
+        providerId,
+        weight: 1,
+        isBackup: false,
+        ...(limits?.requestsPerDay ? { requestsPerDay: limits.requestsPerDay } : {}),
+        ...(limits?.requestsPerMonth ? { requestsPerMonth: limits.requestsPerMonth } : {}),
+      };
+    });
+  }
+  return config;
 }
 
 export async function runInit(options: InitOptions = {}) {
@@ -65,7 +100,7 @@ export async function runInit(options: InitOptions = {}) {
 
   // 2. Build default configuration
   const profile = hasCard ? 'with-card' : 'no-card';
-  const config: OmniMeshConfig = generateDefaultConfig(profile);
+  const config: OmniMeshConfig = attachProviderQuotas(generateDefaultConfig(profile));
   config.domain = domain;
   // The secret lives only in .env: omnimesh.config.yaml is meant to be committed
 

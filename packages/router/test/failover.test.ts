@@ -451,5 +451,20 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
       expect(res.headers.get('X-Omni-Node')).toBe('node-2');
       expect(res.headers.get('X-Omni-Attempts')).toBe('1');
     });
+
+    it('moves traffic to the next free tier before a provider quota runs out', async () => {
+      node1ShouldFail = false;
+      const router = createRouterApp({
+        config: cfg([{ url: url1, providerId: 'netlify', requestsPerDay: 20 }, { url: url3, providerId: 'vercel' }]),
+        gatewaySecret: TEST_SECRET,
+      });
+      const served: string[] = [];
+      for (let i = 0; i < 25; i++) {
+        served.push((await router.request('/api/data')).headers.get('X-Omni-Node')!);
+      }
+      // Diverts at 95% of the 20/day quota: 19 on netlify, then vercel takes over without any error
+      expect(served.slice(0, 19).every((n) => n === 'netlify')).toBe(true);
+      expect(served.slice(19).every((n) => n === 'vercel')).toBe(true);
+    });
   });
 });

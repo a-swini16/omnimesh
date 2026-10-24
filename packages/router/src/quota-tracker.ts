@@ -1,9 +1,11 @@
 import type { ProviderLimits, UsageSnapshot } from '@omnimesh/core';
 
+export type QuotaLimits = Pick<ProviderLimits, 'requestsPerDay' | 'requestsPerMonth'>;
+
 export interface QuotaTracker {
-  canAcceptTraffic(providerId: string, limits?: ProviderLimits): Promise<boolean>;
+  canAcceptTraffic(providerId: string, limits?: QuotaLimits): Promise<boolean>;
   recordRequest(providerId: string, bytes?: number): Promise<void>;
-  getUsage(providerId: string, limits?: ProviderLimits): Promise<UsageSnapshot>;
+  getUsage(providerId: string, limits?: QuotaLimits): Promise<UsageSnapshot>;
   reset?(): Promise<void>;
 }
 
@@ -19,7 +21,7 @@ export class MemoryQuotaTracker implements QuotaTracker {
     return new Date().toISOString().slice(0, 7);
   }
 
-  async canAcceptTraffic(providerId: string, limits?: ProviderLimits): Promise<boolean> {
+  async canAcceptTraffic(providerId: string, limits?: QuotaLimits): Promise<boolean> {
     if (!limits) return true;
 
     const todayStr = this.getTodayStr();
@@ -61,7 +63,7 @@ export class MemoryQuotaTracker implements QuotaTracker {
     }
   }
 
-  async getUsage(providerId: string, limits?: ProviderLimits): Promise<UsageSnapshot> {
+  async getUsage(providerId: string, limits?: QuotaLimits): Promise<UsageSnapshot> {
     const todayStr = this.getTodayStr();
     const today = this.dailyCounts.get(providerId);
     const requestsToday = (today && today.dateStr === todayStr) ? today.count : 0;

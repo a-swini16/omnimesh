@@ -49,6 +49,12 @@ describe('OmniMesh CLI Suite (init, doctor, deploy, chaos, add/remove)', () => {
     expect(example).not.toContain(jwt);
     expect(fs.statSync(envPath).mode & 0o077).toBe(0);
 
+    // No-card mesh: no card-only providers, and quota-limited nodes carry their free-tier limits
+    const nodes = Object.values(parsed.pools).flat() as any[];
+    expect(nodes.some((n) => (typeof n === 'string' ? n : n.url).includes('oracle'))).toBe(false);
+    const netlify = nodes.find((n) => n.providerId === 'netlify');
+    expect(netlify.requestsPerMonth).toBe(125000);
+
     // Doctor checks passes on freshly initialized project
     const doctorPassed = await runDoctor({ cwd: tmpDir });
     expect(doctorPassed).toBe(true);
