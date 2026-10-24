@@ -273,4 +273,32 @@ describe('@omnimesh/node Middleware Suite', () => {
       expect(passed).toBe(true);
     });
   });
+
+  describe('[M-4] JWT claims', () => {
+    const S = TEST_SECRET;
+
+    it('signs with a 15-minute expiry by default and rejects tokens without exp', async () => {
+      const claims = await verifyJwt(await signJwt({ sub: 'u' }, S), S);
+      expect(claims.exp - claims.iat).toBe(900);
+      const forever = await signJwt({ sub: 'u' }, S, { expiresInSeconds: null });
+      await expect(verifyJwt(forever, S)).rejects.toThrow(/exp/);
+    });
+
+    it('allows small clock skew (30 s) but not more', async () => {
+      await expect(verifyJwt(await signJwt({ sub: 'u' }, S, { expiresInSeconds: -10 }), S)).resolves.toBeTruthy();
+      await expect(verifyJwt(await signJwt({ sub: 'u' }, S, { expiresInSeconds: -120 }), S)).rejects.toThrow(/expired/);
+    });
+
+    it('checks issuer and audience when configured, including in jwtAuth', async () => {
+      const token = await signJwt({ sub: 'u' }, S, { issuer: 'omnimesh-auth', audience: 'api' });
+      await expect(verifyJwt(token, S, { issuer: 'omnimesh-auth', audience: 'api' })).resolves.toBeTruthy();
+      await expect(verifyJwt(token, S, { audience: 'billing' })).rejects.toThrow(/audience/);
+      await expect(verifyJwt(token, S, { issuer: 'evil' })).rejects.toThrow(/issuer/);
+
+      const app = new Hono();
+      app.use('*', jwtAuth({ secret: S, audience: 'billing' }));
+      app.get('/x', (c) => c.text('ok'));
+      expect((await app.request('/x', { headers: { Authorization: `Bearer ${token}` } })).status).toBe(401);
+    });
+  });
 });

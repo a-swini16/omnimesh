@@ -39,7 +39,12 @@ async function getHmacKey(secret: string): Promise<CryptoKey> {
 export async function signJwt(
   payload: Record<string, any>,
   secret: string,
-  options: { expiresInSeconds?: number } = {}
+  options: {
+    /** Lifetime in seconds (default 900). Pass null only for tokens you will never verify with verifyJwt. */
+    expiresInSeconds?: number | null;
+    issuer?: string;
+    audience?: string;
+  } = {}
 ): Promise<string> {
   const enc = new TextEncoder();
   const header = { alg: 'HS256', typ: 'JWT' };
@@ -48,9 +53,10 @@ export async function signJwt(
     ...payload,
     iat: now,
   };
-  if (options.expiresInSeconds) {
-    fullPayload.exp = now + options.expiresInSeconds;
-  }
+  const ttl = options.expiresInSeconds === undefined ? 900 : options.expiresInSeconds;
+  if (ttl !== null) fullPayload.exp = now + ttl;
+  if (options.issuer) fullPayload.iss = options.issuer;
+  if (options.audience) fullPayload.aud = options.audience;
 
   const encodedHeader = base64UrlEncode(enc.encode(JSON.stringify(header)));
   const encodedPayload = base64UrlEncode(enc.encode(JSON.stringify(fullPayload)));
@@ -66,7 +72,16 @@ export async function signJwt(
 /**
  * Verify a stateless HS256 JWT using Web Crypto (<1ms CPU time)
  */
-export async function verifyJwt(token: string, secret: string): Promise<Record<string, any>> {
+export interface VerifyJwtOptions {
+  /** Required `iss` claim, if set */
+  issuer?: string;
+  /** Required `aud` claim (string or one entry of an array), if set */
+  audience?: string;
+  /** Accepted clock difference between nodes, in seconds (default 30, max 300) */
+  clockToleranceSeconds?: number;
+}
+
+export async function verifyJwt(token: string, secret: string, options: VerifyJwtOptions = {}): Promise<Record<string, any>> {
   const parts = token.split('.');
   if (parts.length !== 3) {
     throw new Error('Invalid JWT format');
@@ -93,11 +108,23 @@ export async function verifyJwt(token: string, secret: string): Promise<Record<s
   const payload = JSON.parse(payloadJson);
 
   const now = Math.floor(Date.now() / 1000);
-  if (typeof payload.exp === 'number' && now > payload.exp) {
+  const skew = Math.min(Math.max(options.clockToleranceSeconds ?? 30, 0), 300);
+  // Tokens without exp would stay valid forever if leaked
+  if (typeof payload.exp !== 'number') {
+    throw new Error('JWT has no exp claim');
+  }
+  if (now > payload.exp + skew) {
     throw new Error('JWT token has expired');
   }
-  if (typeof payload.nbf === 'number' && now < payload.nbf) {
+  if (typeof payload.nbf === 'number' && now + skew < payload.nbf) {
     throw new Error('JWT token is not yet valid');
+  }
+  if (options.issuer !== undefined && payload.iss !== options.issuer) {
+    throw new Error('JWT issuer mismatch');
+  }
+  if (options.audience !== undefined) {
+    const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    if (!aud.includes(options.audience)) throw new Error('JWT audience mismatch');
   }
 
   return payload;
@@ -106,7 +133,7 @@ export async function verifyJwt(token: string, secret: string): Promise<Record<s
 /** Hono context variables set by jwtAuth: `new Hono<{ Variables: JwtVariables }>()` */
 export type JwtVariables = { user: Record<string, any> };
 
-export interface JwtAuthOptions {
+export interface JwtAuthOptions extends VerifyJwtOptions {
   secret?: string;
   optional?: boolean;
 }
@@ -133,7 +160,7 @@ export function jwtAuth(options: JwtAuthOptions = {}) {
 
     const token = authHeader.substring(7).trim();
     try {
-      const claims = await verifyJwt(token, secret);
+      const claims = await verifyJwt(token, secret, options);
       c.set('user', claims);
       await next();
     } catch {
