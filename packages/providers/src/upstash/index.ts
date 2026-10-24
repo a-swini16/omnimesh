@@ -1,4 +1,4 @@
-import type { ProviderAdapter, ProviderLimits, DeployResult, UsageSnapshot } from '@omnimesh/core';
+import { DeployNotAutomatedError, type ProviderAdapter, type ProviderLimits, type DeployResult } from '@omnimesh/core';
 import limitsJson from './limits.json' with { type: 'json' };
 
 export const upstashAdapter: ProviderAdapter = {
@@ -24,34 +24,12 @@ export const upstashAdapter: ProviderAdapter = {
     }
   },
 
-  async deploy(appPath: string, config: Record<string, string>): Promise<DeployResult> {
-    const valid = await this.validateCredentials(config);
-    if (!valid) throw new Error('Invalid Upstash credentials');
-
-    const url = config.UPSTASH_REDIS_REST_URL || 'https://upstash-db.upstash.io';
-    return {
-      providerId: this.id,
-      success: true,
-      url,
-      deploymentId: `upstash_${Date.now()}`,
-      role: 'cache',
-      logsUrl: 'https://console.upstash.com',
-      createdAt: new Date().toISOString(),
-    };
+  async deploy(): Promise<DeployResult> {
+    throw new DeployNotAutomatedError(this.displayName, 'Create it in the provider dashboard and put its URL/credentials in .env; there is nothing to deploy.');
   },
 
   healthUrl(deployment: DeployResult | { url: string }): string {
     return `${deployment.url.replace(/\/$/, '')}/ping`;
-  },
-
-  async getUsage(config: Record<string, string>): Promise<UsageSnapshot> {
-    return {
-      providerId: this.id,
-      requestsToday: 1250,
-      quotaPercentUsed: 13,
-      nearQuotaWarning: false,
-      timestamp: new Date().toISOString(),
-    };
   },
 
   async destroy(_deployment: DeployResult, _config: Record<string, string>): Promise<void> {},

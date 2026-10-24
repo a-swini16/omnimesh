@@ -9,6 +9,13 @@ export interface DeployOptions {
   dryRun?: boolean;
 }
 
+// Adapters without API deploys say how to deploy instead; that is guidance, not a failure
+function describeDeployError(name: string, err: any): string {
+  return err?.name === 'DeployNotAutomatedError'
+    ? pc.cyan(`   ℹ ${err.message}`)
+    : pc.yellow(`   ⚠ Deploy failed on ${name}: ${err?.message ?? err}`);
+}
+
 export async function runDeploy(options: DeployOptions = {}) {
   const cwd = options.cwd || process.cwd();
   console.log(pc.bold(pc.cyan('\n🚀 OmniMesh Multi-Cloud Parallel Deployment Orchestrator\n')));
@@ -71,7 +78,7 @@ export async function runDeploy(options: DeployOptions = {}) {
         deploymentResults.push(result);
         console.log(pc.green(`   ✔ Deployed ${pc.bold(adapter.displayName)} -> ${result.url}`));
       } catch (err: any) {
-        console.log(pc.yellow(`   ⚠ Deploy notice on ${adapter.displayName}: ${err.message}`));
+        console.log(describeDeployError(adapter.displayName, err));
       }
     })
   );
@@ -87,7 +94,7 @@ export async function runDeploy(options: DeployOptions = {}) {
         const routerResult = await cfAdapter.deploy(cwd, envConfig);
         console.log(pc.green(`   ✔ Edge Router is live at ${pc.bold(routerResult.url)}`));
       } catch (err: any) {
-        console.log(pc.yellow(`   ⚠ Edge Router deployment: ${err.message}`));
+        console.log(describeDeployError('Edge Router', err));
       }
     }
   }
@@ -124,7 +131,7 @@ export async function runDeploy(options: DeployOptions = {}) {
     }
   }
 
-  console.log(pc.bold(pc.green('\n🎉 OmniMesh deployment completed successfully!')));
+  console.log(pc.bold(pc.green(options.dryRun ? '\n✔ Dry run finished.' : '\n🎉 Every pool has at least one healthy node.')));
   console.log(`Unified Endpoint: ${pc.bold(pc.cyan(`https://${config.domain}`))}\n`);
   return true;
 }

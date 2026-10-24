@@ -1,4 +1,4 @@
-import type { ProviderAdapter, ProviderLimits, DeployResult, UsageSnapshot } from '@omnimesh/core';
+import { DeployNotAutomatedError, type ProviderAdapter, type ProviderLimits, type DeployResult } from '@omnimesh/core';
 import limitsJson from './limits.json' with { type: 'json' };
 
 export const supabaseAdapter: ProviderAdapter = {
@@ -16,34 +16,12 @@ export const supabaseAdapter: ProviderAdapter = {
     return url.includes('.supabase.co') && key.length > 20;
   },
 
-  async deploy(appPath: string, config: Record<string, string>): Promise<DeployResult> {
-    const valid = await this.validateCredentials(config);
-    if (!valid) throw new Error('Invalid Supabase credentials');
-
-    const url = config.SUPABASE_URL || 'https://xyz.supabase.co';
-    return {
-      providerId: this.id,
-      success: true,
-      url,
-      deploymentId: `supa_${Date.now()}`,
-      role: 'database',
-      logsUrl: 'https://app.supabase.com',
-      createdAt: new Date().toISOString(),
-    };
+  async deploy(): Promise<DeployResult> {
+    throw new DeployNotAutomatedError(this.displayName, 'Create it in the provider dashboard and put its URL/credentials in .env; there is nothing to deploy.');
   },
 
   healthUrl(deployment: DeployResult | { url: string }): string {
     return `${deployment.url.replace(/\/$/, '')}/rest/v1/`;
-  },
-
-  async getUsage(config: Record<string, string>): Promise<UsageSnapshot> {
-    return {
-      providerId: this.id,
-      storageMbUsed: 180,
-      quotaPercentUsed: 18,
-      nearQuotaWarning: false,
-      timestamp: new Date().toISOString(),
-    };
   },
 
   async destroy(_deployment: DeployResult, _config: Record<string, string>): Promise<void> {},

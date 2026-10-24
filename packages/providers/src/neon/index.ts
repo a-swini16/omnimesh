@@ -1,4 +1,4 @@
-import type { ProviderAdapter, ProviderLimits, DeployResult, UsageSnapshot } from '@omnimesh/core';
+import { DeployNotAutomatedError, type ProviderAdapter, type ProviderLimits, type DeployResult } from '@omnimesh/core';
 import limitsJson from './limits.json' with { type: 'json' };
 
 export const neonAdapter: ProviderAdapter = {
@@ -17,36 +17,12 @@ export const neonAdapter: ProviderAdapter = {
     return false;
   },
 
-  async deploy(appPath: string, config: Record<string, string>): Promise<DeployResult> {
-    const valid = await this.validateCredentials(config);
-    if (!valid) throw new Error('Invalid Neon credentials');
-
-    const projectId = config.NEON_PROJECT_ID || 'neon_main';
-    const pooledUrl = config.DATABASE_URL || `postgres://user:pass@ep-cool-pooler.neon.tech/neondb?sslmode=require`;
-
-    return {
-      providerId: this.id,
-      success: true,
-      url: pooledUrl,
-      deploymentId: projectId,
-      role: 'database',
-      logsUrl: 'https://console.neon.tech',
-      createdAt: new Date().toISOString(),
-    };
+  async deploy(): Promise<DeployResult> {
+    throw new DeployNotAutomatedError(this.displayName, 'Create it in the provider dashboard and put its URL/credentials in .env; there is nothing to deploy.');
   },
 
   healthUrl(deployment: DeployResult | { url: string }): string {
     return 'https://console.neon.tech/api/v2/status';
-  },
-
-  async getUsage(config: Record<string, string>): Promise<UsageSnapshot> {
-    return {
-      providerId: this.id,
-      storageMbUsed: 120,
-      quotaPercentUsed: 23,
-      nearQuotaWarning: false,
-      timestamp: new Date().toISOString(),
-    };
   },
 
   async destroy(_deployment: DeployResult, _config: Record<string, string>): Promise<void> {},

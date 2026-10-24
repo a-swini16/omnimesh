@@ -80,3 +80,14 @@ export class ConfigValidationError extends OmniMeshError {
     this.errors = errors;
   }
 }
+
+/**
+ * Thrown by adapters whose deployment is not automated through the provider API.
+ * The message tells the developer the real way to deploy, instead of reporting a fake success.
+ */
+export class DeployNotAutomatedError extends OmniMeshError {
+  constructor(displayName: string, howToDeploy: string) {
+    super(`${displayName}: automatic deploy is not implemented. ${howToDeploy}`, 'ERR_DEPLOY_NOT_AUTOMATED', 501);
+    this.name = 'DeployNotAutomatedError';
+  }
+}

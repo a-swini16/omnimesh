@@ -1,4 +1,4 @@
-import type { ProviderAdapter, ProviderLimits, DeployResult, UsageSnapshot } from '@omnimesh/core';
+import { DeployNotAutomatedError, type ProviderAdapter, type ProviderLimits, type DeployResult } from '@omnimesh/core';
 import limitsJson from './limits.json' with { type: 'json' };
 
 export const cloudflareAdapter: ProviderAdapter = {
@@ -23,35 +23,12 @@ export const cloudflareAdapter: ProviderAdapter = {
     }
   },
 
-  async deploy(appPath: string, config: Record<string, string>): Promise<DeployResult> {
-    const valid = await this.validateCredentials(config);
-    if (!valid) throw new Error('Invalid Cloudflare API credentials');
-
-    const domain = config.OMNIMESH_DOMAIN || 'api.yourdomain.com';
-    return {
-      providerId: this.id,
-      success: true,
-      url: `https://${domain}`,
-      deploymentId: `cf_${Date.now()}`,
-      role: 'edge-router',
-      logsUrl: `https://dash.cloudflare.com`,
-      createdAt: new Date().toISOString(),
-    };
+  async deploy(): Promise<DeployResult> {
+    throw new DeployNotAutomatedError(this.displayName, 'Deploy the router with `npx wrangler deploy` in packages/router (see wrangler.toml.example).');
   },
 
   healthUrl(deployment: DeployResult | { url: string }): string {
     return `${deployment.url.replace(/\/$/, '')}/_omnimesh/status`;
-  },
-
-  async getUsage(config: Record<string, string>): Promise<UsageSnapshot> {
-    return {
-      providerId: this.id,
-      requestsToday: 15400,
-      requestsThisMonth: 420000,
-      quotaPercentUsed: 15,
-      nearQuotaWarning: false,
-      timestamp: new Date().toISOString(),
-    };
   },
 
   async destroy(_deployment: DeployResult, _config: Record<string, string>): Promise<void> {},

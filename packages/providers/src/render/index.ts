@@ -1,4 +1,4 @@
-import type { ProviderAdapter, ProviderLimits, DeployResult, UsageSnapshot } from '@omnimesh/core';
+import { DeployNotAutomatedError, type ProviderAdapter, type ProviderLimits, type DeployResult } from '@omnimesh/core';
 import limitsJson from './limits.json' with { type: 'json' };
 
 export const renderAdapter: ProviderAdapter = {
@@ -22,37 +22,12 @@ export const renderAdapter: ProviderAdapter = {
     }
   },
 
-  async deploy(appPath: string, config: Record<string, string>): Promise<DeployResult> {
-    const valid = await this.validateCredentials(config);
-    if (!valid) throw new Error('Invalid Render API credentials');
-
-    const serviceName = config.RENDER_SERVICE_NAME || 'omnimesh-core-api';
-    const url = `https://${serviceName}.onrender.com`;
-
-    return {
-      providerId: this.id,
-      success: true,
-      url,
-      deploymentId: `rnd_${Date.now()}`,
-      role: 'compute',
-      logsUrl: `https://dashboard.render.com`,
-      createdAt: new Date().toISOString(),
-    };
+  async deploy(): Promise<DeployResult> {
+    throw new DeployNotAutomatedError(this.displayName, 'Connect this repo in the provider dashboard (Git auto-deploy on push); `omnimesh deploy` then verifies /health on every node.');
   },
 
   healthUrl(deployment: DeployResult | { url: string }): string {
     return `${deployment.url.replace(/\/$/, '')}/health`;
-  },
-
-  async getUsage(config: Record<string, string>): Promise<UsageSnapshot> {
-    return {
-      providerId: this.id,
-      requestsToday: 4100,
-      requestsThisMonth: 95000,
-      quotaPercentUsed: 35,
-      nearQuotaWarning: false,
-      timestamp: new Date().toISOString(),
-    };
   },
 
   async destroy(_deployment: DeployResult, _config: Record<string, string>): Promise<void> {},

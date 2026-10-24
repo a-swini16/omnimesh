@@ -1,4 +1,4 @@
-import type { ProviderAdapter, ProviderLimits, DeployResult, UsageSnapshot } from '@omnimesh/core';
+import { DeployNotAutomatedError, type ProviderAdapter, type ProviderLimits, type DeployResult } from '@omnimesh/core';
 import limitsJson from './limits.json' with { type: 'json' };
 
 export const vercelAdapter: ProviderAdapter = {
@@ -22,37 +22,12 @@ export const vercelAdapter: ProviderAdapter = {
     }
   },
 
-  async deploy(appPath: string, config: Record<string, string>): Promise<DeployResult> {
-    const valid = await this.validateCredentials(config);
-    if (!valid) throw new Error('Invalid Vercel credentials');
-
-    const projectName = config.VERCEL_PROJECT_NAME || 'omnimesh-burst';
-    const url = `https://${projectName}.vercel.app`;
-
-    return {
-      providerId: this.id,
-      success: true,
-      url,
-      deploymentId: `vcl_${Date.now()}`,
-      role: 'compute',
-      logsUrl: `https://vercel.com`,
-      createdAt: new Date().toISOString(),
-    };
+  async deploy(): Promise<DeployResult> {
+    throw new DeployNotAutomatedError(this.displayName, 'Connect this repo in the provider dashboard (Git auto-deploy on push); `omnimesh deploy` then verifies /health on every node.');
   },
 
   healthUrl(deployment: DeployResult | { url: string }): string {
     return `${deployment.url.replace(/\/$/, '')}/api/health`;
-  },
-
-  async getUsage(config: Record<string, string>): Promise<UsageSnapshot> {
-    return {
-      providerId: this.id,
-      requestsToday: 3200,
-      requestsThisMonth: 120000,
-      quotaPercentUsed: 12,
-      nearQuotaWarning: false,
-      timestamp: new Date().toISOString(),
-    };
   },
 
   async destroy(_deployment: DeployResult, _config: Record<string, string>): Promise<void> {},

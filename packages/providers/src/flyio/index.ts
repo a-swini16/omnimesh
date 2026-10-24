@@ -1,4 +1,4 @@
-import type { ProviderAdapter, ProviderLimits, DeployResult, UsageSnapshot } from '@omnimesh/core';
+import { DeployNotAutomatedError, type ProviderAdapter, type ProviderLimits, type DeployResult } from '@omnimesh/core';
 import limitsJson from './limits.json' with { type: 'json' };
 
 export const flyioAdapter: ProviderAdapter = {
@@ -14,22 +14,8 @@ export const flyioAdapter: ProviderAdapter = {
     return Boolean(token && token.length > 20);
   },
 
-  async deploy(appPath: string, config: Record<string, string>): Promise<DeployResult> {
-    const valid = await this.validateCredentials(config);
-    if (!valid) throw new Error('Invalid Fly.io API token');
-
-    const appName = config.FLY_APP_NAME || 'omnimesh-fly';
-    const url = `https://${appName}.fly.dev`;
-
-    return {
-      providerId: this.id,
-      success: true,
-      url,
-      deploymentId: `fly_${Date.now()}`,
-      role: 'compute',
-      logsUrl: 'https://fly.io/dashboard',
-      createdAt: new Date().toISOString(),
-    };
+  async deploy(): Promise<DeployResult> {
+    throw new DeployNotAutomatedError(this.displayName, 'Connect this repo in the provider dashboard (Git auto-deploy on push); `omnimesh deploy` then verifies /health on every node.');
   },
 
   healthUrl(deployment: DeployResult | { url: string }): string {

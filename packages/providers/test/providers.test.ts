@@ -92,4 +92,19 @@ describe('OmniMesh Provider Adapter Registry & Verified Limits', () => {
       })
     ).toBe(false); // unreachable/fake endpoint must never count as valid
   });
+
+  it('[H-5] never reports a deploy or usage numbers that did not really happen', async () => {
+    const fakeCreds: Record<string, string> = {
+      KOYEB_API_TOKEN: 'koyeb_api_token_sample_key', RENDER_API_KEY: 'rnd_sample_key_1234567890',
+      VERCEL_TOKEN: 'v'.repeat(24), NETLIFY_AUTH_TOKEN: 'n'.repeat(24), CLOUDFLARE_API_TOKEN: 'c'.repeat(24),
+      CF_TUNNEL_TOKEN: 'tunnel', ORACLE_HOST: 'oracle.example.com', __MOCK__: 'true',
+    };
+    for (const provider of getAllProviders()) {
+      // Usage must come from the provider's API; hardcoded numbers mislead quota decisions
+      expect(provider.getUsage, `${provider.id}.getUsage`).toBeUndefined();
+      const result = await provider.deploy('.', fakeCreds).then((r) => r, (e: Error) => e);
+      expect(result, `${provider.id}.deploy`).toBeInstanceOf(Error);
+      expect((result as Error).message, provider.id).toMatch(/omnimesh deploy|wrangler|dashboard|Git|docker compose/i);
+    }
+  });
 });

@@ -1,4 +1,4 @@
-import type { ProviderAdapter, ProviderLimits, DeployResult, UsageSnapshot } from '@omnimesh/core';
+import { DeployNotAutomatedError, type ProviderAdapter, type ProviderLimits, type DeployResult } from '@omnimesh/core';
 import limitsJson from './limits.json' with { type: 'json' };
 
 export const denoDeployAdapter: ProviderAdapter = {
@@ -15,37 +15,12 @@ export const denoDeployAdapter: ProviderAdapter = {
     return token.length > 20;
   },
 
-  async deploy(appPath: string, config: Record<string, string>): Promise<DeployResult> {
-    const valid = await this.validateCredentials(config);
-    if (!valid) throw new Error('Invalid Deno Deploy credentials');
-
-    const appName = config.DENO_PROJECT_NAME || 'omnimesh-auth';
-    const url = `https://${appName}.deno.dev`;
-
-    return {
-      providerId: this.id,
-      success: true,
-      url,
-      deploymentId: `deno_${Date.now()}`,
-      role: 'compute',
-      logsUrl: `https://dash.deno.com`,
-      createdAt: new Date().toISOString(),
-    };
+  async deploy(): Promise<DeployResult> {
+    throw new DeployNotAutomatedError(this.displayName, 'Connect this repo in the provider dashboard (Git auto-deploy on push); `omnimesh deploy` then verifies /health on every node.');
   },
 
   healthUrl(deployment: DeployResult | { url: string }): string {
     return `${deployment.url.replace(/\/$/, '')}/health`;
-  },
-
-  async getUsage(config: Record<string, string>): Promise<UsageSnapshot> {
-    return {
-      providerId: this.id,
-      requestsToday: 9500,
-      requestsThisMonth: 210000,
-      quotaPercentUsed: 9,
-      nearQuotaWarning: false,
-      timestamp: new Date().toISOString(),
-    };
   },
 
   async destroy(_deployment: DeployResult, _config: Record<string, string>): Promise<void> {},

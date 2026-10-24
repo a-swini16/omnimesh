@@ -1,4 +1,4 @@
-import type { ProviderAdapter, ProviderLimits, DeployResult, UsageSnapshot } from '@omnimesh/core';
+import { DeployNotAutomatedError, type ProviderAdapter, type ProviderLimits, type DeployResult } from '@omnimesh/core';
 import limitsJson from './limits.json' with { type: 'json' };
 
 export const railwayAdapter: ProviderAdapter = {
@@ -14,22 +14,8 @@ export const railwayAdapter: ProviderAdapter = {
     return Boolean(token && token.length > 20);
   },
 
-  async deploy(appPath: string, config: Record<string, string>): Promise<DeployResult> {
-    const valid = await this.validateCredentials(config);
-    if (!valid) throw new Error('Invalid Railway token');
-
-    const projectId = config.RAILWAY_PROJECT_ID || `rw_${Date.now()}`;
-    const url = `https://${projectId}.up.railway.app`;
-
-    return {
-      providerId: this.id,
-      success: true,
-      url,
-      deploymentId: projectId,
-      role: 'compute',
-      logsUrl: 'https://railway.com/dashboard',
-      createdAt: new Date().toISOString(),
-    };
+  async deploy(): Promise<DeployResult> {
+    throw new DeployNotAutomatedError(this.displayName, 'Connect this repo in the provider dashboard (Git auto-deploy on push); `omnimesh deploy` then verifies /health on every node.');
   },
 
   healthUrl(deployment: DeployResult | { url: string }): string {
