@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OmniMesh — Federated Cloud Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: rgba(17, 24, 39, 0.75);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent-cyan: #06b6d4;
+      --accent-violet: #8b5cf6;
+      --accent-emerald: #10b981;
+      --accent-amber: #f59e0b;
+      --accent-rose: #f43f5e;
+      --radius: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(circle at 15% 15%, rgba(6, 182, 212, 0.12) 0%, transparent 40%),
+        radial-gradient(circle at 85% 85%, rgba(139, 92, 246, 0.12) 0%, transparent 40%);
+      color: var(--text-main);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      padding: 24px;
+      line-height: 1.5;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-violet));
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 20px;
+      color: #fff;
+      box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+    }
+
+    .brand h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .brand p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .badge-no-card {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--accent-emerald);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-emerald);
+      box-shadow: 0 0 8px var(--accent-emerald);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.15); }
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--card-border);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-main);
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .btn-chaos {
+      background: linear-gradient(135deg, rgba(244, 63, 94, 0.2), rgba(244, 63, 94, 0.05));
+      border-color: rgba(244, 63, 94, 0.4);
+      color: #fda4af;
+    }
+
+    .btn-chaos:hover {
+      background: linear-gradient(135deg, rgba(244, 63, 94, 0.35), rgba(244, 63, 94, 0.1));
+      box-shadow: 0 0 15px rgba(244, 63, 94, 0.3);
+    }
+
+    /* Metric Cards Grid */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .metric-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 20px;
+      backdrop-filter: blur(12px);
+    }
+
+    .metric-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .metric-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .metric-sub {
+      font-size: 12px;
+      color: var(--accent-emerald);
+      margin-top: 4px;
+    }
+
+    /* Layout Columns */
+    .dashboard-layout {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    @media (max-width: 900px) {
+      .dashboard-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 24px;
+      backdrop-filter: blur(12px);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+
+    .card-header h2 {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    /* Nodes List */
+    .node-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      margin-bottom: 10px;
+      transition: border-color 0.2s;
+    }
+
+    .node-item:hover {
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .node-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .node-tag {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.08);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .node-name {
+      font-weight: 500;
+      font-size: 14px;
+    }
+
+    .node-status {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 13px;
+    }
+
+    .latency-pill {
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--accent-cyan);
+    }
+
+    /* Quota Bars */
+    .quota-item {
+      margin-bottom: 18px;
+    }
+
+    .quota-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    .quota-bar-bg {
+      height: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 9999px;
+      overflow: hidden;
+    }
+
+    .quota-bar-fill {
+      height: 100%;
+      border-radius: 9999px;
+      transition: width 0.4s ease;
+    }
+
+    .fill-green { background: var(--accent-emerald); }
+    .fill-amber { background: var(--accent-amber); }
+    .fill-rose { background: var(--accent-rose); }
+
+    /* Live Event Table */
+    .events-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .events-table th {
+      text-align: left;
+      padding: 10px 12px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--card-border);
+      font-weight: 500;
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .events-table td {
+      padding: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .badge-status {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 11px;
+    }
+
+    .status-200 { background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); }
+    .status-failover { background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); }
+
+    /* Toast Notification */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #1f2937;
+      border: 1px solid var(--accent-cyan);
+      color: #fff;
+      padding: 14px 20px;
+      border-radius: 8px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+      font-size: 13px;
+      display: none;
+      z-index: 999;
+      animation: slideUp 0.3s ease;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand">
+        <div class="logo-icon">Ω</div>
+        <div>
+          <h1>OmniMesh Federation</h1>
+          <p>api.yourdomain.com · Sub-3s Multi-Cloud Auto-Failover</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="badge badge-no-card">
+          <span class="status-dot"></span>
+          No-Card Profile Active
+        </div>
+        <button class="btn btn-chaos" onclick="triggerChaosDemo()">
+          ⚡ Run Chaos Failover Test
+        </button>
+      </div>
+    </header>
+
+    <!-- Top Metrics -->
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-title">Active Nodes</div>
+        <div class="metric-value" id="val-nodes">6 / 6</div>
+        <div class="metric-sub">100% Upstream Coverage</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-title">Measured Failover Time</div>
+        <div class="metric-value" id="val-failover">2.42 s</div>
+        <div class="metric-sub">Target: &lt; 3.00 seconds</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-title">Edge Latency (p95)</div>
+        <div class="metric-value">18 ms</div>
+        <div class="metric-sub">Cloudflare Worker Proxying</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-title">Estimated Monthly Cost</div>
+        <div class="metric-value" style="color: var(--accent-emerald);">$0.00</div>
+        <div class="metric-sub">Merged Free-Tier Pools</div>
+      </div>
+    </div>
+
+    <!-- Main Layout -->
+    <div class="dashboard-layout">
+      <!-- Left: Active Compute Pools -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Active Compute & Microservice Pools</h2>
+          <span style="font-size: 12px; color: var(--text-muted);">Shared Circuit Breaker TTL: 30s</span>
+        </div>
+
+        <div id="pools-container">
+          <div class="node-item">
+            <div class="node-info">
+              <span class="node-tag">/api [P1]</span>
+              <div>
+                <div class="node-name">Koyeb Serverless Container</div>
+                <div style="font-size: 11px; color: var(--text-muted);">core-api.koyeb.app · Hot Standby</div>
+              </div>
+            </div>
+            <div class="node-status">
+              <span class="latency-pill">24ms</span>
+              <span class="badge status-200">HEALTHY</span>
+            </div>
+          </div>
+
+          <div class="node-item">
+            <div class="node-info">
+              <span class="node-tag">/api [P2]</span>
+              <div>
+                <div class="node-name">Render Web Service</div>
+                <div style="font-size: 11px; color: var(--text-muted);">core-api.onrender.com · Warm Backup (Keep-Alive 14m)</div>
+              </div>
+            </div>
+            <div class="node-status">
+              <span class="latency-pill">38ms</span>
+              <span class="badge status-200">STANDBY</span>
+            </div>
+          </div>
+
+          <div class="node-item">
+            <div class="node-info">
+              <span class="node-tag">/auth</span>
+              <div>
+                <div class="node-name">Deno Deploy Edge</div>
+                <div style="font-size: 11px; color: var(--text-muted);">auth-service.deno.dev · Stateless EdDSA/JWT</div>
+              </div>
+            </div>
+            <div class="node-status">
+              <span class="latency-pill">16ms</span>
+              <span class="badge status-200">HEALTHY</span>
+            </div>
+          </div>
+
+          <div class="node-item">
+            <div class="node-info">
+              <span class="node-tag">/webhooks</span>
+              <div>
+                <div class="node-name">Netlify Functions</div>
+                <div style="font-size: 11px; color: var(--text-muted);">webhooks.netlify.app · Background Workers</div>
+              </div>
+            </div>
+            <div class="node-status">
+              <span class="latency-pill">42ms</span>
+              <span class="badge status-200">HEALTHY</span>
+            </div>
+          </div>
+
+          <div class="node-item">
+            <div class="node-info">
+              <span class="node-tag">DATABASE</span>
+              <div>
+                <div class="node-name">Neon Serverless Postgres</div>
+                <div style="font-size: 11px; color: var(--text-muted);">Mode A: Managed Single Writer + PgBouncer</div>
+              </div>
+            </div>
+            <div class="node-status">
+              <span class="latency-pill">Connected</span>
+              <span class="badge status-200">ACTIVE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Provider Free-Tier Quota Meters -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Provider Quota Meters</h2>
+          <span style="font-size: 12px; color: var(--text-muted);">Proactive Throttling @ 95%</span>
+        </div>
+
+        <div class="quota-item">
+          <div class="quota-header">
+            <span>Cloudflare Workers</span>
+            <span>18,400 / 100,000 req (18%)</span>
+          </div>
+          <div class="quota-bar-bg">
+            <div class="quota-bar-fill fill-green" style="width: 18%;"></div>
+          </div>
+        </div>
+
+        <div class="quota-item">
+          <div class="quota-header">
+            <span>Render Web Service</span>
+            <span>240 / 750 free hrs (32%)</span>
+          </div>
+          <div class="quota-bar-bg">
+            <div class="quota-bar-fill fill-green" style="width: 32%;"></div>
+          </div>
+        </div>
+
+        <div class="quota-item">
+          <div class="quota-header">
+            <span>Upstash Redis</span>
+            <span>1,420 / 10,000 cmds (14%)</span>
+          </div>
+          <div class="quota-bar-bg">
+            <div class="quota-bar-fill fill-green" style="width: 14%;"></div>
+          </div>
+        </div>
+
+        <div class="quota-item">
+          <div class="quota-header">
+            <span>Neon Storage</span>
+            <span>120 / 512 MB (23%)</span>
+          </div>
+          <div class="quota-bar-bg">
+            <div class="quota-bar-fill fill-green" style="width: 23%;"></div>
+          </div>
+        </div>
+
+        <div class="quota-item">
+          <div class="quota-header">
+            <span>Supabase File Storage</span>
+            <span>180 / 1,024 MB (17%)</span>
+          </div>
+          <div class="quota-bar-bg">
+            <div class="quota-bar-fill fill-green" style="width: 17%;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Event Stream Table -->
+    <div class="card">
+      <div class="card-header">
+        <h2>Live Request & Failover Event Stream</h2>
+        <span style="font-size: 12px; color: var(--accent-emerald);">● Streaming Real-Time Telemetry</span>
+      </div>
+
+      <table class="events-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Method & Route</th>
+            <th>Serving Node</th>
+            <th>Attempts</th>
+            <th>Latency</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="events-body">
+          <tr>
+            <td>16:29:12</td>
+            <td>GET /api/feed</td>
+            <td>Koyeb (Hot Standby)</td>
+            <td>1</td>
+            <td>22ms</td>
+            <td><span class="badge-status status-200">200 OK</span></td>
+          </tr>
+          <tr>
+            <td>16:29:10</td>
+            <td>POST /api/orders [Idempotent]</td>
+            <td>Render (Warm Backup)</td>
+            <td>2 (Failover)</td>
+            <td>2,450ms</td>
+            <td><span class="badge-status status-failover">FAILOVER 200</span></td>
+          </tr>
+          <tr>
+            <td>16:29:04</td>
+            <td>GET /auth/verify</td>
+            <td>Deno Deploy Edge</td>
+            <td>1</td>
+            <td>14ms</td>
+            <td><span class="badge-status status-200">200 OK</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.innerText = msg;
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 4000);
+    }
+
+    function triggerChaosDemo() {
+      showToast('⚡ Injected Chaos: Primary node simulated failure. Testing Edge Router failover...');
+      
+      const tbody = document.getElementById('events-body');
+      const row = document.createElement('tr');
+      const now = new Date().toTimeString().split(' ')[0];
+
+      row.innerHTML = `
+        <td>${now}</td>
+        <td>GET /api/checkout</td>
+        <td style="color: #f59e0b;">Render (Backup Node)</td>
+        <td><strong>2 (Auto-Failover)</strong></td>
+        <td>2,410ms</td>
+        <td><span class="badge-status status-failover">FAILOVER 200</span></td>
+      `;
+      tbody.insertBefore(row, tbody.firstChild);
+
+      setTimeout(() => {
+        showToast('🚀 Sub-3s Failover Success! Traffic moved to backup node in 2.41s without client error.');
+      }, 2500);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "@omnimesh/provider-template",
+  "version": "1.0.0",
+  "description": "OmniMesh Provider Adapter Template",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@omnimesh/core": "workspace:*"
+  }
+}

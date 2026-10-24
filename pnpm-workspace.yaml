@@ -1,0 +1,9 @@
+packages:
+  - 'packages/*'
+  - 'packages/providers/*'
+  - 'examples/*'
+  - 'benchmarks'
+  - 'docs'
+
+allowBuilds:
+  esbuild: true

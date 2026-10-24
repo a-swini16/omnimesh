@@ -1,0 +1,17 @@
+{
+  "providerId": "template",
+  "displayName": "Template Provider",
+  "requiresCard": false,
+  "tier": "free",
+  "requestsPerDay": 100000,
+  "requestsPerMonth": 3000000,
+  "bandwidthGbPerMonth": 100,
+  "ramMb": 512,
+  "vCpu": 0.5,
+  "storageMb": 1024,
+  "maxCpuExecutionMs": 10000,
+  "sleepsIfIdle": false,
+  "idleSleepMinutes": null,
+  "lastVerified": "2026-10-24",
+  "sourceUrl": "https://example.com/pricing"
+}

@@ -1,0 +1,17 @@
+{
+  "providerId": "neon",
+  "displayName": "Neon Serverless Postgres",
+  "requiresCard": false,
+  "tier": "free",
+  "requestsPerDay": null,
+  "requestsPerMonth": null,
+  "bandwidthGbPerMonth": null,
+  "ramMb": null,
+  "vCpu": 0.25,
+  "storageMb": 512,
+  "maxCpuExecutionMs": null,
+  "sleepsIfIdle": true,
+  "idleSleepMinutes": 5,
+  "lastVerified": "2026-10-24",
+  "sourceUrl": "https://neon.tech/pricing"
+}

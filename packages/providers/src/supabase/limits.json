@@ -1,0 +1,17 @@
+{
+  "providerId": "supabase",
+  "displayName": "Supabase Postgres & Object Storage",
+  "requiresCard": false,
+  "tier": "free",
+  "requestsPerDay": null,
+  "requestsPerMonth": null,
+  "bandwidthGbPerMonth": 5,
+  "ramMb": null,
+  "vCpu": 0.25,
+  "storageMb": 1024,
+  "maxCpuExecutionMs": null,
+  "sleepsIfIdle": true,
+  "idleSleepMinutes": 10080,
+  "lastVerified": "2026-10-24",
+  "sourceUrl": "https://supabase.com/pricing"
+}

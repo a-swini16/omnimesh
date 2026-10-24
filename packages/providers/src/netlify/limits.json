@@ -1,0 +1,17 @@
+{
+  "providerId": "netlify",
+  "displayName": "Netlify Functions & Webhooks",
+  "requiresCard": false,
+  "tier": "free",
+  "requestsPerDay": null,
+  "requestsPerMonth": 125000,
+  "bandwidthGbPerMonth": 100,
+  "ramMb": 1024,
+  "vCpu": 1.0,
+  "storageMb": null,
+  "maxCpuExecutionMs": 10000,
+  "sleepsIfIdle": false,
+  "idleSleepMinutes": null,
+  "lastVerified": "2026-10-24",
+  "sourceUrl": "https://www.netlify.com/pricing/"
+}

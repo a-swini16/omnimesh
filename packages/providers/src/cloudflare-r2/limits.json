@@ -1,0 +1,17 @@
+{
+  "providerId": "cloudflare-r2",
+  "displayName": "Cloudflare R2 Object Storage",
+  "requiresCard": true,
+  "tier": "free",
+  "requestsPerDay": null,
+  "requestsPerMonth": 1000000,
+  "bandwidthGbPerMonth": null,
+  "ramMb": null,
+  "vCpu": null,
+  "storageMb": 10240,
+  "maxCpuExecutionMs": null,
+  "sleepsIfIdle": false,
+  "idleSleepMinutes": null,
+  "lastVerified": "2026-10-24",
+  "sourceUrl": "https://developers.cloudflare.com/r2/pricing/"
+}

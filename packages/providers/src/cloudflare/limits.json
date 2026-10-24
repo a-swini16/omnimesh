@@ -1,0 +1,17 @@
+{
+  "providerId": "cloudflare",
+  "displayName": "Cloudflare Workers & CDN",
+  "requiresCard": false,
+  "tier": "free",
+  "requestsPerDay": 100000,
+  "requestsPerMonth": 3000000,
+  "bandwidthGbPerMonth": null,
+  "ramMb": 128,
+  "vCpu": null,
+  "storageMb": null,
+  "maxCpuExecutionMs": 10,
+  "sleepsIfIdle": false,
+  "idleSleepMinutes": null,
+  "lastVerified": "2026-10-24",
+  "sourceUrl": "https://developers.cloudflare.com/workers/platform/pricing/"
+}

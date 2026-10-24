@@ -1,0 +1,17 @@
+{
+  "providerId": "deno-deploy",
+  "displayName": "Deno Deploy Edge",
+  "requiresCard": false,
+  "tier": "free",
+  "requestsPerDay": 100000,
+  "requestsPerMonth": 3000000,
+  "bandwidthGbPerMonth": 100,
+  "ramMb": 512,
+  "vCpu": null,
+  "storageMb": null,
+  "maxCpuExecutionMs": 50,
+  "sleepsIfIdle": false,
+  "idleSleepMinutes": null,
+  "lastVerified": "2026-10-24",
+  "sourceUrl": "https://deno.com/deploy/pricing"
+}

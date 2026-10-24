@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # Cloudflare Tunnel: Exposes core-api and postgres securely with ZERO open ingress firewall ports
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: omnimesh-cf-tunnel
+    restart: always
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+    networks:
+      - mesh-net
+
+  # Core API Node
+  core-api:
+    image: ${DOCKER_IMAGE:-omnimesh-api:latest}
+    container_name: omnimesh-core-api
+    restart: always
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - GATEWAY_SECRET=${GATEWAY_SECRET}
+      - JWT_SECRET=${JWT_SECRET}
+      - DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnimesh
+      - REDIS_URL=redis://redis:6379
+      - OMNIMESH_PROVIDER=oracle
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - mesh-net
+
+  # Primary PostgreSQL 16 (Mode B: with WAL logical replication enabled)
+  postgres:
+    image: postgres:16-alpine
+    container_name: omnimesh-postgres-primary
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: omnimesh
+    command: >
+      postgres
+      -c wal_level=logical
+      -c max_replication_slots=5
+      -c max_wal_senders=5
+      -c shared_buffers=512MB
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - mesh-net
+
+  # In-Memory Cache & Distributed Lock
+  redis:
+    image: redis:7-alpine
+    container_name: omnimesh-redis
+    restart: always
+    command: redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
+    networks:
+      - mesh-net
+
+networks:
+  mesh-net:
+    driver: bridge
+
+volumes:
+  pgdata:
+    driver: local

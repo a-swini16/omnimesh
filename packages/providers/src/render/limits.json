@@ -1,0 +1,17 @@
+{
+  "providerId": "render",
+  "displayName": "Render Cloud Application Hosting",
+  "requiresCard": false,
+  "tier": "free",
+  "requestsPerDay": null,
+  "requestsPerMonth": null,
+  "bandwidthGbPerMonth": 100,
+  "ramMb": 512,
+  "vCpu": 0.5,
+  "storageMb": null,
+  "maxCpuExecutionMs": null,
+  "sleepsIfIdle": true,
+  "idleSleepMinutes": 15,
+  "lastVerified": "2026-10-24",
+  "sourceUrl": "https://render.com/docs/free"
+}
