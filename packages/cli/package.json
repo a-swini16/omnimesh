@@ -1,7 +1,7 @@
 {
   "name": "omnimesh",
-  "version": "1.0.0",
-  "description": "OmniMesh CLI — Zero-cost multi-cloud server federation with auto-failover",
+  "version": "1.1.0",
+  "description": "OmniMesh CLI \u2014 Zero-cost multi-cloud server federation with auto-failover",
   "type": "module",
   "bin": {
     "omnimesh": "./bin/omnimesh.js"
@@ -29,5 +29,27 @@
   },
   "devDependencies": {
     "typescript": "^5.7.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OWNER/omnimesh.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/OWNER/omnimesh#readme",
+  "bugs": {
+    "url": "https://github.com/OWNER/omnimesh/issues"
+  },
+  "license": "MIT",
+  "keywords": [
+    "free-tier",
+    "multi-cloud",
+    "failover",
+    "load-balancer",
+    "edge-router",
+    "cloudflare-workers",
+    "serverless",
+    "high-availability",
+    "aws-alternative",
+    "self-hosted"
+  ]
 }

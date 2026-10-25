@@ -221,7 +221,7 @@ nav { flex: 1; overflow-y: auto; }
 .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 550; }
 .steps { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
 .code-block { position: relative; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); }
-.code-block pre { margin: 0; padding: 12px 14px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; }
+.code-block pre { margin: 0; padding: 44px 14px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; }
 .code-block .copy { position: absolute; top: 8px; right: 8px; }
 
 /* Setup: checklist and builder */

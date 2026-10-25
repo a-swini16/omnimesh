@@ -4,7 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
+| 1.1.x   | :white_check_mark: |
+| < 1.1   | :x:                |
 
 ---
 
@@ -39,8 +40,10 @@ If the old secret leaked, keep step 4's window as short as possible.
 
 ## 🚨 Reporting a Vulnerability
 
-If you discover a security vulnerability in OmniMesh, please do not open a public issue. Instead, report it privately to:
+Please **do not open a public issue**. Report it privately through GitHub's private vulnerability reporting:
 
-**Email:** `security@omnimesh.dev` (or open a confidential GitHub Security Advisory).
+**[Report a vulnerability](https://github.com/OWNER/omnimesh/security/advisories/new)** (Security tab → *Report a vulnerability*)
 
-We will acknowledge receipt within 48 hours and provide a timeline for patch release and disclosure.
+Include the affected package and version, steps to reproduce, and the impact you expect. We aim to acknowledge reports within 48 hours and agree on a fix and disclosure timeline with you. Please give us a reasonable window to release a fix before you disclose publicly.
+
+The latest audit, with every finding and its fix, is in [docs/audit/AUDIT_REPORT.md](docs/audit/AUDIT_REPORT.md).

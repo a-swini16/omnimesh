@@ -1,271 +1,214 @@
+<!-- Before publishing: replace OWNER with your GitHub username in this file, package.json, SECURITY.md, CONTRIBUTING.md and .github/. -->
 <div align="center">
 
-# 🌐 OmniMesh
+<img src="docs/images/logo.svg" width="76" alt="OmniMesh logo">
 
-### *Your free tiers, merged into one cloud.*
+# OmniMesh
 
-A resilient, zero-cost backend mesh for side projects, startups, student apps, and MVPs — with automatic multi-cloud failover.
+### The free AWS alternative for side projects, MVPs and student apps.
 
-[![CI Status](https://github.com/omnimesh/omnimesh/actions/workflows/ci.yml/badge.svg)](https://github.com/omnimesh/omnimesh/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Zero Credit Card Ready](https://img.shields.io/badge/Zero%20Credit%20Card-100%25%20Supported-emerald.svg)](#-zero-credit-card-mode)
-[![Failover Time](https://img.shields.io/badge/Auto--Failover-%3C%202.5s-cyan.svg)](#-measured-benchmarks)
+**One domain. Many free clouds. Automatic failover. $0 until you outgrow it.**
+
+[![CI](https://github.com/OWNER/omnimesh/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/omnimesh/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![No credit card](https://img.shields.io/badge/credit%20card-not%20required-34c77b.svg)](docs/zero-card-guide.md)
+[![TypeScript strict](https://img.shields.io/badge/TypeScript-strict-3178c6.svg)](tsconfig.base.json)
+[![Load tested](https://img.shields.io/badge/load%20tested-0%20duplicate%20orders-5b8cff.svg)](#tested-under-load)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+[Quick start](#quick-start) · [Dashboard](#the-dashboard) · [How it works](#how-it-works) · [Honest limits](#honest-limits) · [No-card guide](docs/zero-card-guide.md)
+
+<img src="docs/images/overview-dark.webp" alt="OmniMesh dashboard: live mesh map, alerts, quota bars and incidents" width="100%">
 
 </div>
 
 ---
 
-## ⚡ What is OmniMesh?
+## Why OmniMesh
 
-Think of it as **"OmniRouter, but for servers instead of AI providers"**: one entry point, many interchangeable backends, automatic failover.
+AWS is powerful, but a surprise bill can sink a student project or a pre-revenue MVP. Free tiers cost nothing, but each one has a catch: it sleeps, it caps requests, or it goes down, and when it does, so does your app.
 
-OmniMesh merges many cloud providers' free tiers (**Cloudflare, Koyeb, Render, Vercel, Netlify, Deno Deploy, Neon, Supabase, Upstash, and Oracle Cloud**) behind a single domain. If one server goes down, times out, or hits its quota, traffic moves to the next one automatically.
+**OmniMesh puts one router in front of many free tiers.** It does for servers what [OmniRoute](https://github.com/cheaper-inference/OmniRoute) does for AI providers: one entry point, many interchangeable backends, automatic failover.
 
+|  | AWS | One free tier | **OmniMesh** |
+| :--- | :--- | :--- | :--- |
+| Monthly cost | Pay as you go | $0 | **$0** |
+| Credit card | Required | Sometimes | **Not required** (no-card mode) |
+| A server dies | Multi-AZ, if you pay for it | Your app is down | **Next node answers after one 2.5 s timeout** |
+| Free limit reached | — | Errors (429) | **Moves to the next free tier at 95%** |
+| Operations view | CloudWatch | One console per provider | **One live dashboard** |
+| Scale ceiling | Very high | That provider's quota | **~100,000 requests/day** on free plans ([why](#honest-limits)) |
+
+OmniMesh is how you ship for $0 and stay online. When you outgrow free tiers, move the same setup to paid plans; your code doesn't change.
+
+## Features
+
+- **Automatic failover:** every request goes to a healthy node. Timeouts, crashes and `502`–`504` open a circuit for 30 s, after which one probe request checks whether the node is back.
+- **Uses every free tier:** each node knows its provider's free quota, and traffic moves to the next free tier at 95%, before users ever see a `429`.
+- **No-card mode:** `omnimesh init --no-card` builds the whole mesh from providers that need no card. Oracle Cloud and R2 are added only if you have one.
+- **Safe retries:** writes are retried only with an `Idempotency-Key`, stored in shared Redis, so a failover never charges a customer twice.
+- **Locked-down backends:** nodes reject anything without the router's secret, in constant time, and the secret can be rotated with zero downtime.
+- **Weighted load balancing and backup-only nodes**, per pool (`/api`, `/auth`, `/webhooks`, …).
+- **Live dashboard:** a mesh map, quota bars, incidents, a provider catalog with connection guides, and a config builder.
+- **Tested under load:** 99 automated tests, plus six k6 scenarios against a local mock mesh.
+
+## The dashboard
+
+The router serves an operator dashboard at `https://<your-domain>/_omnimesh/dashboard`. Sign in with `OMNIMESH_STATUS_TOKEN`. Every number on it is live data from your router.
+
+| Providers: what to add, card or no card | Setup: checklist and config builder |
+| :---: | :---: |
+| <img src="docs/images/providers-dark.webp" alt="Provider catalog grouped by no-card, needs-card and paid" width="100%"> | <img src="docs/images/setup-light.webp" alt="Config builder generating omnimesh.config.yaml" width="100%"> |
+| **Connection guide for each provider** | **Routing: every pool and node** |
+| <img src="docs/images/provider-drawer-dark.webp" alt="Provider details with limits and connection steps" width="100%"> | <img src="docs/images/routing-light.webp" alt="Routing page with node states and quota bars" width="100%"> |
+
+Pages: **Overview**, **Routing**, **Free tiers**, **Health**, **Activity**, **Providers**, **Setup**, **Settings**. The page makes no outside requests and is served with a strict Content Security Policy. If no status token is set, it returns 404.
+
+## How it works
+
+```mermaid
+flowchart LR
+  U[Your users] --> R["Router<br/>Cloudflare Worker<br/>api.yourapp.com"]
+  R -->|"/api"| A1[Koyeb] & A2[Render] & A3[Vercel]
+  R -->|"/auth"| B1[Deno Deploy] & B2[Netlify]
+  A1 & A2 & A3 & B1 & B2 --> D[("Neon / Supabase<br/>one writer")]
+  A1 & A2 & A3 & B1 & B2 --> C[("Upstash Redis<br/>idempotency keys")]
 ```
-Incoming Request: GET https://api.yourdomain.com/api/products
-  │
-  ├── [Attempt 1] ──> Oracle ARM / Koyeb (Down or Timeout > 2.5s) ──✖ (Trip circuit breaker for 30s)
-  │
-  └── [Attempt 2] ──> Render / Vercel (Healthy) ───────────────────✔ 200 OK (Served in 2.4s!)
-```
 
----
+1. A request arrives at your one domain. The router picks a healthy node in the matching pool and adds the gateway secret.
+2. If that node times out (2.5 s), refuses the connection or answers `429`/`502`–`504`, the router tries the next node, up to 3 attempts within a 6 s budget, and skips the dead node for 30 s.
+3. A node close to its free quota is skipped until the quota resets.
+4. Every node runs the same stateless app and shares one database and one Redis, so any node can answer any request.
 
-## 🚀 Quickstart in 3 Commands
+## Quick start
 
-> The `omnimesh` package is **not on npm yet**, so `npx omnimesh` will not work. Until it is published, run the CLI from a clone:
+> The `omnimesh` package is not on npm yet. Run the CLI from a clone:
 >
 > ```bash
-> git clone https://github.com/omnimesh/omnimesh.git && cd omnimesh && pnpm install
+> git clone https://github.com/OWNER/omnimesh.git && cd omnimesh && pnpm install
 > alias omnimesh="node $PWD/packages/cli/bin/omnimesh.js"
 > ```
->
-> Then use `omnimesh` instead of `npx omnimesh` in the steps below, from your own app's folder.
 
-### 1. Initialize OmniMesh in your repo
-```bash
-npx omnimesh init
-```
-*Detects whether you have a credit card. If not, automatically configures the **100% no-card profile** (Cloudflare + Koyeb + Render + Vercel + Netlify + Neon + Upstash + Supabase).*
+In your app's folder:
 
-### 2. Verify credentials and origin security
 ```bash
-npx omnimesh doctor
+omnimesh init --no-card --domain api.yourapp.com   # config + .env with generated secrets
 ```
 
-### Live dashboard
+1. Deploy your app on Koyeb, Render, Vercel, Netlify and Deno Deploy (each one deploys from GitHub). Add [`@omnimesh/node`](packages/node) so every node checks the gateway secret and serves `/health`.
+2. Paste each app's URL into `omnimesh.config.yaml`, or build the file in the dashboard's **Setup** page.
+3. Check everything:
 
-Your router serves an operator dashboard at `https://<your-domain>/_omnimesh/dashboard`. Sign in with `OMNIMESH_STATUS_TOKEN` from your `.env`. Everything on it is live data from your router, refreshed every 3 seconds:
+   ```bash
+   omnimesh doctor
+   ```
 
-| Page | What you get |
+4. Deploy the router from `packages/router` (copy `wrangler.toml.example` to `wrangler.toml` first):
+
+   ```bash
+   npx wrangler deploy
+   ```
+
+5. Verify every pool, then open `/_omnimesh/dashboard`:
+
+   ```bash
+   omnimesh deploy
+   ```
+
+The [no-card guide](docs/zero-card-guide.md) walks through every account and secret. To see failover without any accounts, run:
+
+```bash
+omnimesh chaos
+```
+
+| Command | What it does |
 | :--- | :--- |
-| **Overview** | Requests, success rate, failovers, p95 latency, a live mesh map and recent incidents |
-| **Routing** | Every pool and node: serving, standby, down (with the reason) or quota reached |
-| **Free tiers** | Quota bars per provider (warning at 80%, automatic switch at 95%) and the 100k/day router ceiling |
-| **Health** | Latency percentiles, failures, failover settings, and whether shared KV and rate limiting are connected |
-| **Activity** | Timeline of failures, recoveries, failovers, quota switches and outages |
-| **Providers** | All supported providers grouped by *No card needed* / *Needs a card* / *Paid only*, with limits, last-verified date, and step-by-step connection guides |
-| **Setup** | A live checklist of what is still missing, and a config builder that produces your `omnimesh.config.yaml` |
+| `omnimesh init [--no-card \| --with-card] [--keep-alive] [--force]` | Writes the config and `.env` with generated secrets; refuses to overwrite without `--force` |
+| `omnimesh doctor` | Finds placeholders, weak or missing secrets, unknown providers and invalid pools |
+| `omnimesh deploy` | Shows how each provider deploys, then checks `/health` on every node (exit code 1 if a pool has no healthy node) |
+| `omnimesh status` | Live health and latency for every node |
+| `omnimesh chaos` | Kills a local node and shows failover in your terminal |
+| `omnimesh add-provider <id> --url <url>` | Adds a node; adding `oracle` switches to the with-card profile |
 
-The page holds no data and makes no outside requests; it is hidden (404) unless a status token is set.
+## Tested under load
 
-### 3. Watch real-time failover live in your terminal
-```bash
-npx omnimesh chaos
-```
+The mock mesh is 5 mock providers behind the real router, under k6 load. These numbers show router *behavior*; Cloudflare edge latency adds network time on top. Reproduce any row with `benchmarks/mock-mesh/run.sh <scenario>`.
 
----
+| Scenario | Result |
+| :--- | :--- |
+| Flash sale: 500 buyers, the primary writes and then times out | **0 duplicate orders, 0 missing** |
+| Primary dies at 100 req/s | **4,001/4,001 succeeded**; only the 250 requests already in flight waited one timeout |
+| Every node down, then back | Clean `503` within the 6 s budget; full recovery as soon as nodes returned |
+| Free quota full, and a provider answering `429` | 3,000/3,000 succeeded; traffic moved to the next free tier |
+| Oversized body, malformed JSON, a buggy endpoint | `413` / `400` on the first attempt; no node taken out of rotation |
+| Two users reading their own profile (44,725 requests) | 0 cross-user responses, 0 cacheable private responses |
 
-## 🎬 Live Chaos Demo (Run it yourself!)
+## Providers
 
-Run `npx omnimesh chaos` to watch a simulated node failure and sub-3-second cross-cloud failover live:
+Free-tier limits are stored in `limits.json` files, each with a `lastVerified` date and a link to the official pricing page.
 
-```text
-🔥 OmniMesh Live Chaos & Auto-Failover Simulator
-Demonstrating sub-3-second cross-cloud failover in real-time...
+| Provider | Role | Card | Free tier (as verified) |
+| :--- | :--- | :---: | :--- |
+| [Cloudflare Workers](https://developers.cloudflare.com/workers/platform/pricing/) | Router, KV, rate limiting | No | 100,000 requests/day |
+| [Koyeb](https://www.koyeb.com/pricing) | Compute | No | 1 small service, 512 MB RAM |
+| [Render](https://render.com/docs/free) | Compute (backup) | No | 750 h/month; sleeps after 15 min idle |
+| [Vercel](https://vercel.com/pricing) | Compute (burst) | No | 1M function invocations/month (Hobby is non-commercial) |
+| [Netlify](https://www.netlify.com/pricing/) | Webhooks, functions | No | 125,000 function requests/month |
+| [Deno Deploy](https://deno.com/deploy/pricing) | Auth, light compute | No | 100,000 requests/day |
+| [Neon](https://neon.tech/pricing) / [Supabase](https://supabase.com/pricing) | Postgres (single writer) | No | 0.5 GB / 500 MB database |
+| [Upstash](https://upstash.com/pricing) | Redis for idempotency | No | 10,000 commands/day |
+| [Oracle Cloud](https://www.oracle.com/cloud/free/) | Big compute | **Yes** | 4 ARM CPUs, 24 GB RAM |
+| [Cloudflare R2](https://developers.cloudflare.com/r2/pricing/) | File storage | **Yes** | 10 GB, no egress fees |
 
-1. Testing Steady-State Traffic:
-   ✔ 200 OK served by Primary (Oracle/Koyeb) in 23ms (Attempts: 1)
+Use one legitimate account per provider. OmniMesh never creates or rotates accounts to dodge limits.
 
-2. Injecting Chaos: Killing Primary Node...
-   Primary node (http://127.0.0.1:41875) is now unresponsive (simulating VM crash/outage)
+## Security
 
-3. Client sends request to https://api.yourdomain.com/api/resource...
+- **Fail-closed:** the router and nodes refuse to start without a strong gateway secret, and the router refuses `http://` upstreams and placeholder hosts.
+- **Backends stay hidden:** client-supplied gateway and forwarding headers are stripped, backend URLs never appear in responses or redirects, and operator endpoints return 404 without the status token.
+- **No cross-user caching:** responses to logged-in users are marked `private, no-store` with `Vary`, so no shared cache can serve one user's data to another.
+- **Strict JWTs:** the algorithm is pinned and `exp` is required, with bounded clock skew and optional `iss`/`aud` checks.
+- **Abuse protection:** request bodies are capped, and rate limits apply per IP and per caller.
+- **Audited:** the full findings and fixes are in [docs/audit/AUDIT_REPORT.md](docs/audit/AUDIT_REPORT.md), and [SECURITY.md](SECURITY.md) covers how to report a vulnerability.
 
-   🚀 FAILOVER SUCCESSFUL! Client received 200 OK
-   • Total Failover Duration: 2.42 seconds
-   • Serving Node:           Warm Backup (Render/Vercel)
-   • Total Attempts:         2
-   • Upstream URL:           https://core-api.onrender.com
+## Honest limits
 
-4. Testing Circuit Breaker on subsequent request:
-   ✔ 200 OK directly routed to Warm Backup in 2ms (Dead node skipped instantly, Attempts: 1)
+Repos that overclaim get torn apart, so here is what OmniMesh does **not** do:
 
-🎉 Chaos test passed! Your backend survived node failure without downtime.
-```
+1. **It is not AWS at Flipkart scale.** Free tiers have real CPU and RAM caps. OmniMesh keeps your app online when one server dies; it doesn't turn 512 MB into 512 GB.
+2. **The free ceiling is about 100,000 requests/day (about 3M/month).** Every request runs the Cloudflare Worker router, and [cache hits count too](https://developers.cloudflare.com/workers/platform/pricing/). Adding providers adds CPU, not requests. Above that, use a paid Workers plan with the same code.
+3. **The database is the single point of failure.** There is exactly one database that accepts writes, so data never splits. If your managed Postgres is down, requests that need it fail until it recovers; a read-only cache mode is on the roadmap. Replicating Oracle Postgres to Neon (Mode B) isn't production-ready yet.
+4. **WebSockets don't fail over mid-stream.** Clients reconnect and land on a healthy node.
+5. **Counters are per router instance.** Node health is shared through KV. Quota counting and the dashboard numbers come from the instance that served them.
+6. **Render sleeps after 15 minutes idle,** so keep it as a backup. Keep-alive pings are off by default, because some providers' terms forbid them.
 
----
+## Roadmap
 
-## 🏛️ System Architecture (v2)
+- [ ] Publish `omnimesh` and `@omnimesh/*` to npm
+- [ ] Read-only cache mode when the database is down
+- [ ] Automated deploys through provider APIs, with rollback
+- [ ] Shared quota counters across router instances
+- [ ] Middleware for FastAPI, Go and Rust backends
+- [ ] More providers: Fly.io free allowances, Turso, Backblaze B2
 
-```
-                            [ Client Applications ]
-                        (Web, Mobile, External Webhooks)
-                                    │
-                         https://api.yourdomain.com
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│  LAYER 1: CDN Edge Shield & Cache (Cloudflare Free Tier)               │
-│  • Every request runs the Worker: 100k/day ceiling on the free plan    │
-│  • DDoS mitigation, SSL termination, and IP rate limiting              │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Uncached dynamic & write traffic
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│  LAYER 2: Intelligent Edge Router (Hono on Cloudflare Workers / Deno)  │
-│  • 2.5s AbortController timeout per node                               │
-│  • Shared health & circuit breaker store (Cloudflare KV / Upstash)     │
-│  • Hard latency budget (max 3 attempts, 6s total)                      │
-│  • Safe Retries: POST retried ONLY with Idempotency-Key                │
-│  • Proactive Quota Routing: diverts traffic before 429 errors          │
-└───────────────────┬───────────────────┬───────────────────┬────────────┘
-                    │ /auth             │ /api              │ /webhooks
-                    ▼                   ▼                   ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│  LAYER 3: Stateless Multi-Cloud Compute Pools                          │
-│  ┌──────────────────────┐ ┌──────────────────────┐ ┌─────────────────┐ │
-│  │ Primary: Oracle ARM  │ │ Standby: Koyeb       │ │ Burst: Vercel   │ │
-│  │ (24GB RAM, 4 OCPUs)  │ │ (512MB RAM, Eco)     │ │ (Serverless)    │ │
-│  └──────────────────────┘ └──────────────────────┘ └─────────────────┘ │
-│  ┌──────────────────────┐ ┌──────────────────────┐ ┌─────────────────┐ │
-│  │ Backup: Render       │ │ Functions: Netlify   │ │ Edge: Deno      │ │
-│  │ (Warm backup / 14m)  │ │ (Async Webhooks)     │ │ (Stateless JWT) │ │
-│  └──────────────────────┘ └──────────────────────┘ └─────────────────┘ │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Shared state
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│  LAYER 4: Authoritative Data & Storage Fabric                          │
-│  • Primary Database: Neon or Supabase Serverless Postgres              │
-│  • Cache & Idempotency: Upstash Serverless Redis (10k cmds/day)        │
-│  • Object Storage: Supabase Storage (No-Card) or Cloudflare R2 (Card)  │
-│  • Optional Mode B: Oracle Postgres 16 with WAL logical replication   │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 📊 Verified Provider Matrix
-
-Every provider quota is loaded from structured `limits.json` files and verified against current official documentation:
-
-| Provider | Role | Card Needed? | Verified Free Tier Limit | Last Verified | Pricing Source |
-| :--- | :--- | :---: | :--- | :---: | :--- |
-| **Cloudflare** | Edge Router, CDN, KV | **No** | 100,000 req/day, 10ms CPU, Unlimited CDN | 2026-10-24 | [Official Docs](https://developers.cloudflare.com/workers/platform/pricing/) |
-| **Koyeb** | Compute (Hot Standby) | **No** | 1 Eco Web Service, 512 MB RAM, 0.1 vCPU | 2026-10-24 | [Official Docs](https://www.koyeb.com/pricing) |
-| **Render** | Compute (Warm Backup) | **No** | 750 free hrs/mo, 512 MB RAM *(Sleeps after 15m idle)* | 2026-10-24 | [Official Docs](https://render.com/docs/free) |
-| **Vercel** | Compute (Burst) | **No** | 100 GB bandwidth/mo, 1M edge invocations/mo | 2026-10-24 | [Official Docs](https://vercel.com/pricing) |
-| **Netlify** | Compute (Webhooks) | **No** | 125,000 function requests/mo, 100 GB bandwidth | 2026-10-24 | [Official Docs](https://www.netlify.com/pricing/) |
-| **Deno Deploy** | Router Mirror, Auth | **No** | 100,000 req/day, 50ms CPU time | 2026-10-24 | [Official Docs](https://deno.com/deploy/pricing) |
-| **Neon** | Primary Postgres | **No** | 0.5 GiB storage, connection pooling | 2026-10-24 | [Official Docs](https://neon.tech/pricing) |
-| **Supabase** | DB & File Storage | **No** | 500 MB DB, 1 GB storage *(No-card R2 alternative)* | 2026-10-24 | [Official Docs](https://supabase.com/pricing) |
-| **Upstash** | Redis Locks & Cache | **No** | 10,000 commands/day, 256 MB memory | 2026-10-24 | [Official Docs](https://upstash.com/pricing) |
-| **Oracle Cloud** | Heavy VM & Mode B DB | **Yes** | 4 ARM OCPUs, 24 GB RAM, 200 GB disk, 10 TB egress | 2026-10-24 | [Official Docs](https://www.oracle.com/cloud/free/) |
-| **Cloudflare R2** | High-Volume Storage | **Yes** | 10 GB storage, 1M Class A ops, $0 egress | 2026-10-24 | [Official Docs](https://developers.cloudflare.com/r2/pricing/) |
-
----
-
-## 💳 Zero Credit Card Mode
-
-Don't have a credit or debit card for cloud registrations? **You can still run OmniMesh.**
-
-Run:
-```bash
-npx omnimesh init --no-card
-```
-OmniMesh will automatically exclude Oracle and R2, routing all jobs to verified zero-card providers:
-* **Router:** Cloudflare Workers Free (No card)
-* **Compute:** Koyeb + Render + Vercel + Netlify (No card)
-* **Database:** Neon or Supabase Postgres (No card)
-* **Cache & Locks:** Upstash Redis (No card)
-* **File Storage:** Supabase Storage (No card)
-
-If you get a card later, simply run `npx omnimesh add-provider oracle` to seamlessly upgrade your mesh without downtime.
-
----
-
-## 📈 Measured Benchmarks
-
-Real, reproducible numbers measured on live federations:
-
-Measured on a local mock mesh (5 mock providers behind the real router, k6 load). They show router *behavior*; Cloudflare edge latency adds network time on top. Reproduce any row with `benchmarks/mock-mesh/run.sh <scenario>`.
-
-| Scenario | Result | Scenario name |
-| :--- | :--- | :--- |
-| Flash sale: 500 buyers, primary writes then times out | **0 duplicate orders, 0 missing** | `flash-sale` |
-| Primary dies during 100 req/s | **4,001/4,001 succeeded**; only the 250 in-flight requests waited one 2.5 s timeout | `primary-dies` |
-| Every node down, then back | Clean 503 within the 6 s budget; full recovery at once | `all-down` |
-| Free quota full + provider returns 429 | 3,000/3,000 succeeded, traffic moved to the next free tier | `quota-429` |
-| Oversized body, malformed JSON, buggy endpoint | 413 / 400 on first attempt; no node taken out of rotation | `bad-input` |
-| Two users reading their own profile, 44,725 requests | 0 cross-user responses, 0 cacheable private responses | `cross-user-cache` |
-
----
-
-## 🎯 Honest Limits & Constraints
-
-Repos that overclaim get torn apart. Here is what OmniMesh can and cannot do:
-
-1. **Not a replacement for AWS at Flipkart or Uber scale:**
-   Free tiers have real CPU and RAM caps. OmniMesh merges them to keep your side project, student app, or MVP online when one server dies; it does not turn 512 MB into 512 GB.
-2. **Database Failover is Hard:**
-   Compute nodes are stateless and easily duplicated. Databases are not. OmniMesh strictly enforces a **Single Writer Rule**:
-   * **Mode A (No-Card Default):** One managed Postgres (Neon/Supabase) shared by all nodes. If the DB provider undergoes maintenance, the app operates in cache-first read mode until recovery.
-   * **Mode B (Oracle Users):** Self-hosted Postgres on Oracle ARM with real-time logical replication to Neon. Failover to Neon is read-only until an operator runs `omnimesh db promote`.
-3. **WebSockets do not fail over mid-stream:**
-   If a server hosting an active WebSocket connection dies, the client reconnects and lands on the next healthy node.
-4. **The free ceiling is 100,000 requests per day (about 3M per month):**
-   Every request to your domain runs the Cloudflare Worker router, and cache hits still count, because [Workers run before the cache](https://developers.cloudflare.com/workers/platform/pricing/). The Workers Free plan allows 100,000 requests/day, resetting at midnight UTC; after that Cloudflare answers with error 1027 until the reset. Adding more compute providers (or Oracle) adds CPU and RAM, not more requests. To go beyond it, move to a paid Workers plan; the code does not change.
-5. **Sleeping Containers (Render):**
-   Render free tier spins down after 15m of inactivity, taking 30–50s to wake up. OmniMesh handles this by:
-   * Placing Render as a warm backup rather than primary hot node.
-   * Generating an automated GitHub Actions keep-alive workflow (`.github/workflows/keep-alive.yml`) that pings `/health` every 14 minutes.
-
----
-
-## 🛡️ Security & Terms of Service Compliance
-
-* **1 Legitimate Account Per Provider:** Never create multiple fake accounts to evade quotas. That rule protects users from bans and the repo from takedowns.
-* **Fail-Closed Origin Protection:** Backend nodes only accept traffic with a valid `X-Gateway-Secret` header; direct requests return `403 Forbidden`. Both router and nodes refuse to start without a strong secret (>= 32 chars).
-* **Safe Retries Only:** Mutating requests (`POST`/`PATCH`) are only auto-retried if an `Idempotency-Key` header is present and locked in Redis.
-* **Private Oracle VM:** Runs behind a Cloudflare Tunnel (`cloudflared`) with zero open public firewall ports.
-
----
-
-## 📦 Monorepo Structure
+## Project layout
 
 ```
-omnimesh/
-├── packages/
-│   ├── core/          # Zod schema, shared TypeScript types, errors
-│   ├── router/        # Hono edge router (Cloudflare Workers, Deno, Node)
-│   ├── node/          # @omnimesh/node middleware (origin secret, JWT, idempotency)
-│   ├── cli/           # npx omnimesh CLI suite
-│   └── providers/     # Modular provider plugins + verified limits.json
-├── examples/          # Sample apps (rest-api, auth-service, webhooks)
-├── benchmarks/        # mock mesh + k6 load and chaos scenarios
-├── docs/              # Documentation site
-└── .github/workflows/ # CI, deploy-mesh, keep-alive, release
+packages/
+  router/      Edge router: failover, quotas, rate limits, dashboard (Cloudflare Worker or Node)
+  node/        Middleware for your backend: gateway secret, JWT, idempotency, health, errors
+  core/        Config schema and shared helpers
+  cli/         The omnimesh command
+  providers/   One adapter + limits.json per provider, Oracle docker-compose
+examples/      rest-api, auth-service (bcrypt login), webhooks
+benchmarks/    Mock mesh + k6 load and chaos scenarios
+docs/          Architecture, no-card guide, audit report
 ```
 
----
+## Contributing
 
-## 🤝 Contributing
+New provider adapters are the easiest way in: copy [`packages/providers/_template`](packages/providers/_template), fill in `limits.json` from the provider's official pricing page, and add a test. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Want to add a new cloud provider? It takes under an hour!  
-Check out our [Provider Template](packages/providers/_template/README.md) and [Contributing Guide](CONTRIBUTING.md).
+## License
 
----
-
-## 📄 License
-
-[MIT](LICENSE) © 2026 OmniMesh Contributors
+[MIT](LICENSE) © 2026 OmniMesh contributors

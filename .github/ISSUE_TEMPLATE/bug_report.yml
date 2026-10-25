@@ -1,0 +1,40 @@
+name: Bug report
+description: Something in OmniMesh doesn't work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Security problem? Don't file it here. Use [private vulnerability reporting](../../security/advisories/new) instead."
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Commands, config (remove secrets and real URLs), or a mock-mesh scenario.
+      render: shell
+    validations:
+      required: true
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      options: [router, node, cli, core, providers, dashboard, examples, docs]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: OmniMesh version and runtime
+      placeholder: "1.1.0, Cloudflare Workers / Node 22"
+  - type: textarea
+    id: output
+    attributes:
+      label: Output of `omnimesh doctor`
+      description: Remove tokens and secrets before pasting.
+      render: shell

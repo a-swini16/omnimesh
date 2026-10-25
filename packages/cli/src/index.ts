@@ -1,3 +1,4 @@
+import { OMNIMESH_VERSION } from '@omnimesh/core';
 import { Command } from 'commander';
 import { runInit } from './commands/init.js';
 import { runDoctor } from './commands/doctor.js';
@@ -21,7 +22,7 @@ export function createProgram() {
   program
     .name('omnimesh')
     .description('OmniMesh — Open-source free-tier server federation with automatic sub-3s failover')
-    .version('1.0.0');
+    .version(OMNIMESH_VERSION);
 
   program
     .command('init')

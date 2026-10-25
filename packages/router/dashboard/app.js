@@ -122,6 +122,7 @@
 
   const fmt = (n) => Number(n || 0).toLocaleString();
   const plural = (n, word) => fmt(n) + ' ' + word + (n === 1 ? '' : 's');
+  const gb = (n) => (n >= 1000 && n % 1000 === 0 ? n / 1000 + ' TB' : n + ' GB');
   function minutes(m) {
     if (m >= 1440 && m % 1440 === 0) return plural(m / 1440, 'day');
     if (m >= 60 && m % 60 === 0) return plural(m / 60, 'hour');
@@ -205,7 +206,7 @@
     const parts = [];
     if (l.requestsPerDay) parts.push(compact(l.requestsPerDay) + ' requests/day');
     else if (l.requestsPerMonth) parts.push(compact(l.requestsPerMonth) + ' requests/month');
-    if (l.bandwidthGbPerMonth) parts.push(l.bandwidthGbPerMonth + ' GB/month');
+    if (l.bandwidthGbPerMonth) parts.push(gb(l.bandwidthGbPerMonth) + '/month');
     if (l.ramMb) parts.push(l.ramMb >= 1024 ? l.ramMb / 1024 + ' GB RAM' : l.ramMb + ' MB RAM');
     if (l.storageMb && parts.length < 3) parts.push(l.storageMb >= 1024 ? l.storageMb / 1024 + ' GB storage' : l.storageMb + ' MB storage');
     if (l.sleepsIfIdle) parts.push(l.idleSleepMinutes ? 'sleeps after ' + minutes(l.idleSleepMinutes) + ' idle' : 'sleeps when idle');
@@ -891,7 +892,7 @@
     const rows = [
       ['Requests per day', l.requestsPerDay && fmt(l.requestsPerDay)],
       ['Requests per month', l.requestsPerMonth && fmt(l.requestsPerMonth)],
-      ['Bandwidth per month', l.bandwidthGbPerMonth && l.bandwidthGbPerMonth + ' GB'],
+      ['Bandwidth per month', l.bandwidthGbPerMonth && gb(l.bandwidthGbPerMonth)],
       ['RAM', l.ramMb && (l.ramMb >= 1024 ? l.ramMb / 1024 + ' GB' : l.ramMb + ' MB')],
       ['vCPU', l.vCpu],
       ['Storage', l.storageMb && (l.storageMb >= 1024 ? l.storageMb / 1024 + ' GB' : l.storageMb + ' MB')],

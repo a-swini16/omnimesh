@@ -1,6 +1,6 @@
 {
   "name": "@omnimesh/router",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "High-performance edge router with sub-3s auto-failover, quota-awareness, and circuit breaking",
   "type": "module",
   "main": "./src/index.ts",
@@ -23,5 +23,15 @@
     "@omnimesh/node": "workspace:*",
     "@cloudflare/workers-types": "^4.20250214.0",
     "typescript": "^5.7.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OWNER/omnimesh.git",
+    "directory": "packages/router"
+  },
+  "homepage": "https://github.com/OWNER/omnimesh#readme",
+  "bugs": {
+    "url": "https://github.com/OWNER/omnimesh/issues"
+  },
+  "license": "MIT"
 }

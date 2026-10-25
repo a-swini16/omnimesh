@@ -1,8 +1,8 @@
 {
   "name": "omnimesh-monorepo",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "OmniMesh \u2014 Open-source free-tier server federation with automatic failover",
+  "description": "The free AWS alternative for side projects and MVPs: one domain in front of many free cloud tiers, with automatic failover.",
   "author": "OmniMesh Contributors",
   "license": "MIT",
   "packageManager": "pnpm@12.15.0",
@@ -19,5 +19,25 @@
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",
     "vitest": "^3.0.7"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OWNER/omnimesh.git"
+  },
+  "homepage": "https://github.com/OWNER/omnimesh#readme",
+  "bugs": {
+    "url": "https://github.com/OWNER/omnimesh/issues"
+  },
+  "keywords": [
+    "free-tier",
+    "multi-cloud",
+    "failover",
+    "load-balancer",
+    "edge-router",
+    "cloudflare-workers",
+    "serverless",
+    "high-availability",
+    "aws-alternative",
+    "self-hosted"
+  ]
 }

@@ -66,4 +66,12 @@ pnpm test:watch
 
 # Typecheck
 pnpm run typecheck
+
+# Rebuild the dashboard bundle after editing packages/router/dashboard/*
+pnpm build:dashboard
+
+# Load and chaos scenarios against a local mock mesh (needs Docker for k6)
+benchmarks/mock-mesh/run.sh flash-sale
 ```
+
+Every pull request needs passing tests and typecheck. A bug fix comes with a test that fails without it. Never commit secrets: `.env` is git-ignored, and CI runs a secret scan.

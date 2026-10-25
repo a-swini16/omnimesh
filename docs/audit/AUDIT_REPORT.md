@@ -12,7 +12,7 @@ Status: **in progress.** Every known Critical, High and Medium issue is fixed wi
 
 **Is this safe for real users yet? Not yet, but the request path is in good shape.** Every known Critical, High and Medium issue is fixed with a test that failed before its fix, and all 6 lean load scenarios pass: 0 duplicate orders across 500 buyers, failover costing only the in-flight requests, clean outages within budget, quota switching with 0 errors, bad input rejected cleanly, and 0 cacheable private responses. Before launch: 9 of the 15 load scenarios have not run (including the 30-minute soak, database-down and Redis-down), an independent re-audit hasn't happened, 4 Low issues are open, and the npm package name is unpublished (D5).
 
-Tests: 90/90 pass; strict typecheck clean.
+Tests: 99/99 pass; strict typecheck clean. Independent security review: no High/Medium findings. Code review: 8 findings, all fixed (`53e9ac0`).
 
 ---
 

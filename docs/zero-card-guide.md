@@ -32,7 +32,7 @@ OmniMesh never creates accounts or uploads your code: providers require you to d
 The `omnimesh` package is not on npm yet, so run the CLI from a clone:
 
 ```bash
-git clone https://github.com/omnimesh/omnimesh.git && cd omnimesh && pnpm install
+git clone https://github.com/OWNER/omnimesh.git && cd omnimesh && pnpm install
 alias omnimesh="node $PWD/packages/cli/bin/omnimesh.js"
 ```
 

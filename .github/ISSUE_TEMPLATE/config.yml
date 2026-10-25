@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/OWNER/omnimesh/security/advisories/new
+    about: Please report security issues privately, not as public issues.
+  - name: No-card setup guide
+    url: https://github.com/OWNER/omnimesh/blob/main/docs/zero-card-guide.md
+    about: Step-by-step setup without a credit card.

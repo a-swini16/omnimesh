@@ -1,6 +1,6 @@
 {
   "name": "@omnimesh/node",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Backend middleware for OmniMesh compute nodes (Express, Hono, Node HTTP)",
   "type": "module",
   "main": "./src/index.ts",
@@ -26,5 +26,15 @@
     "hono": {
       "optional": true
     }
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OWNER/omnimesh.git",
+    "directory": "packages/node"
+  },
+  "homepage": "https://github.com/OWNER/omnimesh#readme",
+  "bugs": {
+    "url": "https://github.com/OWNER/omnimesh/issues"
+  },
+  "license": "MIT"
 }
