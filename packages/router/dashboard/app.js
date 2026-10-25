@@ -1394,6 +1394,18 @@
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden && state.token) poll();
     });
+    const devBtn = $('dev-token-btn');
+    if (devBtn) {
+      devBtn.addEventListener('click', () => {
+        $('token').value = 'dev-token';
+        state.token = 'dev-token';
+        setItem('session', TOKEN_KEY, 'dev-token');
+        $('login-error').textContent = '';
+        setLive('', 'Connecting…');
+        poll();
+      });
+    }
+
     $('login-form').addEventListener('submit', (e) => {
       e.preventDefault();
       const value = $('token').value.trim();

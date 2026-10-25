@@ -15,10 +15,11 @@
     <h1>Sign in to OmniMesh</h1>
     <p class="muted">Enter your router's status token to manage the mesh.</p>
     <label for="token">Status token</label>
-    <input id="token" type="password" required minlength="16" spellcheck="false" autocomplete="off">
+    <input id="token" type="password" required spellcheck="false" autocomplete="off" placeholder="dev-token">
     <div id="login-error" class="form-error" role="alert"></div>
     <button class="btn btn-primary btn-block" type="submit">Connect</button>
-    <p class="hint">It's <code>OMNIMESH_STATUS_TOKEN</code> in the <code>.env</code> that <code>omnimesh init</code> created. It stays in this browser tab only.</p>
+    <button id="dev-token-btn" class="btn btn-outline btn-block" type="button" style="margin-top: 10px;">One-Click Demo Login (dev-token)</button>
+    <p class="hint">For local testing, use <code>dev-token</code>. In production, use <code>OMNIMESH_STATUS_TOKEN</code> from your <code>.env</code>.</p>
   </form>
 </div>
 
