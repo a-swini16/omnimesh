@@ -3,7 +3,8 @@ import { serve } from '@hono/node-server';
 import { createRouterApp } from '@omnimesh/router';
 import { validateOmniMeshConfig } from '@omnimesh/core';
 
-const PROVIDERS = ['koyeb', 'render', 'vercel', 'netlify', 'deno'];
+// Catalog provider ids (deno-deploy, not deno) so the dashboard matches nodes to providers
+const PROVIDERS = ['koyeb', 'render', 'vercel', 'netlify', 'deno-deploy'];
 const koyebQuota = process.env.KOYEB_DAILY_QUOTA ? Number(process.env.KOYEB_DAILY_QUOTA) : undefined;
 
 const config = validateOmniMeshConfig({

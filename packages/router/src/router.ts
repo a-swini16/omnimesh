@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
-import { isPlaceholderUrl, type OmniMeshConfig } from '@omnimesh/core';
+import { isPlaceholderUrl, OMNIMESH_VERSION, type OmniMeshConfig } from '@omnimesh/core';
 import { MemoryHealthStore, type HealthStore } from './health-store.js';
 import { MemoryQuotaTracker, type QuotaTracker } from './quota-tracker.js';
-import { prepareBufferedRequest, fetchWithTimeout, BodyTooLargeError } from './dispatcher.js';
+import { prepareBufferedRequest, fetchWithTimeout, BodyTooLargeError, DEFAULT_MAX_BODY_BYTES } from './dispatcher.js';
 import { MemoryRateLimiter, type RateLimiter } from './rate-limiter.js';
 import { RouterTelemetry } from './telemetry.js';
-import { renderDashboard } from './dashboard.js';
+import { registerDashboard } from './dashboard.js';
+import { getAllProviders } from '@omnimesh/providers';
 
 export interface RouterOptions {
   config: OmniMeshConfig;
@@ -241,7 +242,20 @@ export function createRouterApp(options: RouterOptions) {
       profile: config.profile,
       domain: config.domain,
       instance: { startedAt: new Date(telemetry.startedAt).toISOString(), uptimeSeconds: Math.floor((Date.now() - telemetry.startedAt) / 1000) },
-      routerConfig: { ...config.router, strategy, rateLimit: config.rateLimit },
+      version: OMNIMESH_VERSION,
+      routerConfig: {
+        ...config.router,
+        maxBodyBytes: config.router.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
+        strategy,
+        defaultPool,
+        rateLimit: config.rateLimit,
+      },
+      // Whether state is shared by every router instance or kept per instance (dashboard setup checks)
+      sharing: {
+        health: healthStore instanceof MemoryHealthStore ? 'per-instance' : 'shared',
+        rateLimit: rateLimiter instanceof MemoryRateLimiter ? 'per-instance' : 'shared',
+      },
+      keepAlive: { enabled: config.keepAlive.enabled },
       totals: telemetry.totals,
       latency: telemetry.latency(),
       pools: poolSnapshots,
@@ -250,21 +264,23 @@ export function createRouterApp(options: RouterOptions) {
     });
   });
 
-  // Operator dashboard. The page itself holds no data; it reads /_omnimesh/status with the token the
-  // operator types in. Hidden entirely when no status token is configured.
-  app.get('/_omnimesh/dashboard', (c) => {
-    if (!statusToken) return c.json({ error: 'Not Found' }, 404);
-    const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
-    return c.html(renderDashboard(nonce), 200, {
-      'Content-Security-Policy':
-        `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; ` +
-        "img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-      'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'no-referrer',
-      'X-Frame-Options': 'DENY',
+  // Provider catalog for the dashboard: free-tier limits, card requirement, roles (static data)
+  app.get('/_omnimesh/catalog', (c) => {
+    if (!isOperator(c.req.header('authorization'))) return c.json({ error: 'Not Found' }, 404);
+    return c.json({
+      providers: getAllProviders().map((p) => ({
+        id: p.id,
+        displayName: p.displayName,
+        requiresCard: p.requiresCard,
+        tier: p.tier,
+        roles: p.roles,
+        limits: p.limits,
+      })),
     });
   });
+
+  // Operator dashboard; hidden entirely when no status token is configured
+  registerDashboard(app, () => Boolean(statusToken));
 
   // Main HTTP proxy and auto-failover handler
   app.all('*', async (c) => {

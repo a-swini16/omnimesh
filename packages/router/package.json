@@ -10,12 +10,14 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:dashboard": "node scripts/build-dashboard.mjs"
   },
   "dependencies": {
     "@omnimesh/core": "workspace:*",
     "hono": "^4.7.2",
-    "@hono/node-server": "^1.13.8"
+    "@hono/node-server": "^1.13.8",
+    "@omnimesh/providers": "workspace:*"
   },
   "devDependencies": {
     "@omnimesh/node": "workspace:*",

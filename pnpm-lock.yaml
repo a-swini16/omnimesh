@@ -351,6 +351,9 @@ importers:
       '@omnimesh/core':
         specifier: workspace:*
         version: link:../core
+      '@omnimesh/providers':
+        specifier: workspace:*
+        version: link:../providers
       hono:
         specifier: ^4.7.2
         version: 4.13.13

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<title>OmniMesh</title>
+<link rel="stylesheet" href="/_omnimesh/dashboard/app.css">
+</head>
+<body>
+<div id="login" class="login-screen" hidden>
+  <form id="login-form" class="login-card" autocomplete="off">
+    <div class="brand-mark" aria-hidden="true"></div>
+    <h1>Sign in to OmniMesh</h1>
+    <p class="muted">Enter your router's status token to manage the mesh.</p>
+    <label for="token">Status token</label>
+    <input id="token" type="password" required minlength="16" spellcheck="false" autocomplete="off">
+    <div id="login-error" class="form-error" role="alert"></div>
+    <button class="btn btn-primary btn-block" type="submit">Connect</button>
+    <p class="hint">It's <code>OMNIMESH_STATUS_TOKEN</code> in the <code>.env</code> that <code>omnimesh init</code> created. It stays in this browser tab only.</p>
+  </form>
+</div>
+
+<div id="shell" class="shell" hidden>
+  <aside id="sidebar" class="sidebar" aria-label="Main navigation">
+    <div class="sidebar-brand">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div>
+        <div class="brand-name">OmniMesh</div>
+        <div id="brand-version" class="brand-sub"></div>
+      </div>
+    </div>
+    <nav id="nav"></nav>
+    <div class="sidebar-foot">
+      <div id="foot-domain" class="foot-domain"></div>
+      <div id="foot-uptime" class="muted small"></div>
+    </div>
+  </aside>
+  <div id="scrim" class="scrim" hidden></div>
+
+  <div class="main">
+    <header class="topbar">
+      <button id="menu" class="icon-btn only-mobile" type="button" aria-label="Open navigation"></button>
+      <div class="topbar-title">
+        <h1 id="page-title"></h1>
+        <div id="page-sub" class="muted small"></div>
+      </div>
+      <div class="topbar-actions">
+        <span id="live" class="live-chip" aria-live="polite"><span class="dot"></span><span class="live-text">Connecting…</span></span>
+        <button id="alerts" class="alert-chip" type="button" hidden></button>
+        <button id="theme" class="icon-btn" type="button" aria-label="Toggle light or dark theme"></button>
+        <button id="signout" class="icon-btn" type="button" aria-label="Sign out" title="Sign out"></button>
+      </div>
+    </header>
+    <main id="view" class="view" tabindex="-1"></main>
+  </div>
+</div>
+
+<div id="drawer-root"></div>
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="/_omnimesh/dashboard/app.js" defer></script>
+</body>
+</html>

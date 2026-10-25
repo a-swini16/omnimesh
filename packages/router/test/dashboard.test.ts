@@ -69,24 +69,67 @@ describe('live status API and dashboard', () => {
     expect(s.totals.failed).toBe(4);
   });
 
-  it('serves the dashboard only when a status token is configured, with a strict CSP', async () => {
-    const res = await make().request('/_omnimesh/dashboard');
+  it('serves the dashboard and its assets only when a status token is configured, with a strict CSP', async () => {
+    const router = make();
+    const res = await router.request('/_omnimesh/dashboard');
     expect(res.status).toBe(200);
     const html = await res.text();
     const csp = res.headers.get('Content-Security-Policy') || '';
-    const nonce = /'nonce-([A-Za-z0-9+/=_-]+)'/.exec(csp)?.[1];
-    expect(nonce).toBeTruthy();
-    expect(html).toContain(`<script nonce="${nonce}">`);
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).toContain("style-src 'self'");
     expect(csp).toContain("connect-src 'self'");
     expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).not.toContain('unsafe-inline');
     expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(html).toContain('<script src="/_omnimesh/dashboard/app.js" defer></script>');
     expect(html).not.toContain(url); // node URLs only come from the authenticated API
+
+    for (const [path, type] of [['app.js', 'text/javascript'], ['app.css', 'text/css']]) {
+      const asset = await router.request(`/_omnimesh/dashboard/${path}`);
+      expect(asset.status, path).toBe(200);
+      expect(asset.headers.get('Content-Type'), path).toContain(type);
+      expect(asset.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    }
 
     const noToken = createRouterApp({
       config: validateOmniMeshConfig({ pools: { '/api': [url] } }),
       gatewaySecret: SECRET,
     });
-    expect((await noToken.request('/_omnimesh/dashboard')).status).toBe(404);
+    for (const path of ['/_omnimesh/dashboard', '/_omnimesh/dashboard/app.js', '/_omnimesh/catalog']) {
+      expect((await noToken.request(path)).status, path).toBe(404);
+    }
+  });
+
+  it('dashboard script never injects markup and renders the down banner only for down nodes', async () => {
+    const js = await (await make().request('/_omnimesh/dashboard/app.js')).text();
+    expect(js).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function/);
+    expect(js).toMatch(/if \(n\.state === 'down'\) \{\s*list\.push/);
+  });
+
+  it('catalog lists every provider with card requirement and limits, behind the token', async () => {
+    const router = make();
+    expect((await router.request('/_omnimesh/catalog')).status).toBe(404);
+    const c = (await (await router.request('/_omnimesh/catalog', auth)).json()) as any;
+    const oracle = c.providers.find((p: any) => p.id === 'oracle');
+    expect(oracle).toMatchObject({ requiresCard: true, tier: 'free' });
+    expect(c.providers.find((p: any) => p.id === 'koyeb').requiresCard).toBe(false);
+    expect(c.providers.every((p: any) => /^\d{4}-\d{2}-\d{2}$/.test(p.limits.lastVerified))).toBe(true);
+  });
+
+  it('status reports version, shared-state wiring and router settings for the setup checklist', async () => {
+    const s = (await (await make().request('/_omnimesh/status', auth)).json()) as any;
+    expect(s.version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(s.sharing).toEqual({ health: 'per-instance', rateLimit: 'per-instance' });
+    expect(s.routerConfig).toMatchObject({ strategy: 'priority', defaultPool: '/api', maxBodyBytes: 10 * 1024 * 1024 });
+    expect(s.keepAlive).toEqual({ enabled: false });
+  });
+
+  it('generated dashboard assets match the sources (run pnpm build:dashboard)', async () => {
+    const { renderAssetsModule } = await import('../scripts/build-dashboard.mjs');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const generated = fs.readFileSync(path.resolve(__dirname, '../src/dashboard-assets.generated.ts'), 'utf-8');
+    expect(generated).toBe(renderAssetsModule());
   });
 
   it('records a quota_limit event when a provider reaches its free quota and traffic moves on', async () => {
@@ -106,9 +149,4 @@ describe('live status API and dashboard', () => {
     expect(ev[0].node).toBe('netlify');
   });
 
-  it('dashboard script: only nodes in state "down" produce a down banner', async () => {
-    const html = await (await make().request('/_omnimesh/dashboard')).text();
-    const script = html.slice(html.indexOf('function render(d)'), html.indexOf('function cell('));
-    expect(script).toMatch(/if \(n\.state === 'down'\) \{\s*alerts\.push/);
-  });
 });

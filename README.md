@@ -55,7 +55,19 @@ npx omnimesh doctor
 
 ### Live dashboard
 
-Your router serves an operator dashboard at `https://<your-domain>/_omnimesh/dashboard`: node health, failovers, latency, free-tier quota bars and an incident timeline, refreshed every 3 seconds. Sign in with `OMNIMESH_STATUS_TOKEN` from your `.env`.
+Your router serves an operator dashboard at `https://<your-domain>/_omnimesh/dashboard`. Sign in with `OMNIMESH_STATUS_TOKEN` from your `.env`. Everything on it is live data from your router, refreshed every 3 seconds:
+
+| Page | What you get |
+| :--- | :--- |
+| **Overview** | Requests, success rate, failovers, p95 latency, a live mesh map and recent incidents |
+| **Routing** | Every pool and node: serving, standby, down (with the reason) or quota reached |
+| **Free tiers** | Quota bars per provider (warning at 80%, automatic switch at 95%) and the 100k/day router ceiling |
+| **Health** | Latency percentiles, failures, failover settings, and whether shared KV and rate limiting are connected |
+| **Activity** | Timeline of failures, recoveries, failovers, quota switches and outages |
+| **Providers** | All supported providers grouped by *No card needed* / *Needs a card* / *Paid only*, with limits, last-verified date, and step-by-step connection guides |
+| **Setup** | A live checklist of what is still missing, and a config builder that produces your `omnimesh.config.yaml` |
+
+The page holds no data and makes no outside requests; it is hidden (404) unless a status token is set.
 
 ### 3. Watch real-time failover live in your terminal
 ```bash
