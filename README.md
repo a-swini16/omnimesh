@@ -81,10 +81,25 @@ flowchart LR
 
 ## Quick start
 
-> The `omnimesh` package is not on npm yet. Run the CLI from a clone:
+### Try the live demo locally (1 command)
+
+To test the multi-cloud mesh and open the live operator dashboard right on your computer:
+
+```bash
+git clone https://github.com/a-swini16/omnimesh.git
+cd omnimesh
+pnpm install
+pnpm dev
+```
+👉 Open **`http://localhost:8788/_omnimesh/dashboard`** in your browser and enter token: **`dev-token`**.
+
+---
+
+### Using OmniMesh in your own project
+
+> Run the CLI from a clone:
 >
 > ```bash
-> git clone https://github.com/a-swini16/omnimesh.git && cd omnimesh && pnpm install
 > alias omnimesh="node $PWD/packages/cli/bin/omnimesh.js"
 > ```
 
