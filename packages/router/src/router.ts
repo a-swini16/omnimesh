@@ -4,6 +4,8 @@ import { MemoryHealthStore, type HealthStore } from './health-store.js';
 import { MemoryQuotaTracker, type QuotaTracker } from './quota-tracker.js';
 import { prepareBufferedRequest, fetchWithTimeout, BodyTooLargeError } from './dispatcher.js';
 import { MemoryRateLimiter, type RateLimiter } from './rate-limiter.js';
+import { RouterTelemetry } from './telemetry.js';
+import { renderDashboard } from './dashboard.js';
 
 export interface RouterOptions {
   config: OmniMeshConfig;
@@ -15,6 +17,7 @@ export interface RouterOptions {
   statusToken?: string;
   /** Random source for weighted selection (injectable for tests). */
   random?: () => number;
+  telemetry?: RouterTelemetry;
 }
 
 // Headers that describe a single hop and must not be forwarded, plus ones the router owns
@@ -128,6 +131,7 @@ export function createRouterApp(options: RouterOptions) {
   const statusToken = options.statusToken || readEnv('OMNIMESH_STATUS_TOKEN');
   const random = options.random || Math.random;
   const strategy = config.router.strategy ?? 'priority';
+  const telemetry = options.telemetry || new RouterTelemetry();
 
   // Validate gateway secret fail-closed
   const gatewaySecret = options.gatewaySecret || config.gatewaySecret || readEnv('GATEWAY_SECRET');
@@ -188,20 +192,77 @@ export function createRouterApp(options: RouterOptions) {
 
   const app = new Hono();
 
+  const isOperator = (authHeader: string | undefined) =>
+    Boolean(statusToken) && timingSafeEqual(authHeader || '', `Bearer ${statusToken}`);
+
   // Diagnostic endpoint: lists internal node URLs, so it is only served to operators holding the status token
   app.get('/_omnimesh/status', async (c) => {
-    const auth = c.req.header('authorization') || '';
-    if (!statusToken || !timingSafeEqual(auth, `Bearer ${statusToken}`)) {
+    if (!isOperator(c.req.header('authorization'))) {
       return c.json({ error: 'Not Found' }, 404);
     }
     const health = await healthStore.getAllNodeHealth();
+    const poolSnapshots = await Promise.all(
+      Object.entries(pools).map(async ([prefix, nodes]) => ({
+        prefix,
+        isDefault: prefix === defaultPool,
+        nodes: await Promise.all(
+          nodes.map(async (n) => {
+            const h = health[n.url];
+            const counters = telemetry.nodeCounters(n.url);
+            const usage = n.quota ? await quotaTracker.getUsage(n.quotaKey, n.quota) : undefined;
+            return {
+              label: n.label,
+              providerId: n.providerId ?? null,
+              url: n.url,
+              weight: n.weight,
+              isBackup: n.isBackup,
+              state: h ? (h.status === 'dead' ? 'down' : 'healthy') : 'unknown',
+              failureReason: h?.status === 'dead' ? h.failureReason ?? null : null,
+              lastChecked: h?.lastChecked ?? null,
+              latencyMs: counters.lastLatencyMs ?? h?.latencyMs ?? null,
+              requests: counters.requests,
+              errors: counters.errors,
+              quota: n.quota
+                ? {
+                    requestsPerDay: n.quota.requestsPerDay ?? null,
+                    requestsPerMonth: n.quota.requestsPerMonth ?? null,
+                    usedToday: usage?.requestsToday ?? 0,
+                    usedThisMonth: usage?.requestsThisMonth ?? 0,
+                    percentUsed: usage?.quotaPercentUsed ?? 0,
+                  }
+                : null,
+            };
+          })
+        ),
+      }))
+    );
     return c.json({
       status: 'active',
       profile: config.profile,
       domain: config.domain,
-      routerConfig: config.router,
-      nodes: health,
+      instance: { startedAt: new Date(telemetry.startedAt).toISOString(), uptimeSeconds: Math.floor((Date.now() - telemetry.startedAt) / 1000) },
+      routerConfig: { ...config.router, strategy, rateLimit: config.rateLimit },
+      totals: telemetry.totals,
+      latency: telemetry.latency(),
+      pools: poolSnapshots,
+      events: telemetry.recentEvents(),
       timestamp: new Date().toISOString(),
+    });
+  });
+
+  // Operator dashboard. The page itself holds no data; it reads /_omnimesh/status with the token the
+  // operator types in. Hidden entirely when no status token is configured.
+  app.get('/_omnimesh/dashboard', (c) => {
+    if (!statusToken) return c.json({ error: 'Not Found' }, 404);
+    const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
+    return c.html(renderDashboard(nonce), 200, {
+      'Content-Security-Policy':
+        `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; ` +
+        "img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+      'X-Frame-Options': 'DENY',
     });
   });
 
@@ -222,6 +283,7 @@ export function createRouterApp(options: RouterOptions) {
       for (const key of keys) {
         const { allowed, retryAfterSeconds } = await rateLimiter.hit(key);
         if (!allowed) {
+          telemetry.totals.rateLimited += 1;
           c.header('Retry-After', String(retryAfterSeconds));
           return c.json({ error: 'Too Many Requests', code: 'ERR_RATE_LIMITED' }, 429);
         }
@@ -248,6 +310,7 @@ export function createRouterApp(options: RouterOptions) {
     try {
       bufferedReq = await prepareBufferedRequest(request, config.router.maxBufferBytes, config.router.maxBodyBytes);
     } catch (err) {
+      telemetry.totals.rejected += 1;
       if (err instanceof BodyTooLargeError) {
         return c.json({ error: 'Request body too large.', code: 'ERR_BODY_TOO_LARGE' }, 413);
       }
@@ -260,9 +323,9 @@ export function createRouterApp(options: RouterOptions) {
     const deadCandidates: Candidate[] = [];
 
     for (const node of candidates) {
-      const isHealthy =
-        (await healthStore.isNodeHealthy(node.url, circuitTtlMs)) &&
-        (!node.quota || (await quotaTracker.canAcceptTraffic(node.quotaKey, node.quota)));
+      const quotaOk = !node.quota || (await quotaTracker.canAcceptTraffic(node.quotaKey, node.quota));
+      if (node.quota) telemetry.quotaChecked(node.url, node.label, matchedPrefix, quotaOk);
+      const isHealthy = quotaOk && (await healthStore.isNodeHealthy(node.url, circuitTtlMs));
       (isHealthy ? healthyCandidates : deadCandidates).push(node);
     }
 
@@ -325,8 +388,10 @@ export function createRouterApp(options: RouterOptions) {
         if (isHardFailure || response.status >= 500) {
           lastFailure = `HTTP_${response.status}`;
 
+          telemetry.attemptFailed(node.url, node.label, matchedPrefix, lastFailure, isHardFailure);
           if (!isHardFailure && !READ_METHODS.has(bufferedReq.method)) {
             // An app error on a write is final: pass it through unchanged instead of replaying it on more nodes
+            telemetry.requestFinished(false, Date.now() - startTime, attempts, matchedPrefix, node.label);
             return withTelemetry(response, node, attempts, Date.now() - startTime, credentials, toPublic(url.origin));
           }
 
@@ -336,6 +401,7 @@ export function createRouterApp(options: RouterOptions) {
 
           // CRITICAL SAFETY CHECK: If mutating request without Idempotency-Key, DO NOT retry!
           if (!bufferedReq.canRetry) {
+            telemetry.requestFinished(false, Date.now() - startTime, attempts, matchedPrefix, node.label);
             return c.json(
               {
                 error: `Upstream failed with status ${response.status}. Retry prevented to protect against duplicate writes. Attach 'Idempotency-Key' header to enable automatic failover for mutating requests.`,
@@ -354,6 +420,8 @@ export function createRouterApp(options: RouterOptions) {
         const latency = Date.now() - startTime;
         await healthStore.markNodeHealthy(node.url, latency);
         if (node.quota) await quotaTracker.recordRequest(node.quotaKey);
+        telemetry.attemptSucceeded(node.url, node.label, matchedPrefix, latency);
+        telemetry.requestFinished(true, latency, attempts, matchedPrefix, node.label);
 
         return withTelemetry(response, node, attempts, latency, credentials, toPublic(url.origin));
       } catch (err: any) {
@@ -361,9 +429,11 @@ export function createRouterApp(options: RouterOptions) {
         const isTimeout = err.name === 'AbortError' || err.name === 'TimeoutError' || err.message?.includes('aborted');
         lastFailure = isTimeout ? `Timeout_${timeoutForThisAttempt}ms` : 'NetworkError';
         await healthStore.markNodeDead(node.url, isTimeout ? lastFailure : `NetError: ${err.message}`);
+        telemetry.attemptFailed(node.url, node.label, matchedPrefix, lastFailure, true);
 
         // CRITICAL SAFETY CHECK: If mutating request without Idempotency-Key, DO NOT retry!
         if (!bufferedReq.canRetry) {
+          telemetry.requestFinished(false, Date.now() - startTime, attempts, matchedPrefix, node.label);
           return c.json(
             {
               error: `Upstream timed out or failed to respond. Retry prevented to protect against duplicate transactions. Attach 'Idempotency-Key' header to enable automatic failover.`,
@@ -382,6 +452,7 @@ export function createRouterApp(options: RouterOptions) {
 
     // All attempts exhausted or budget exceeded
     const totalElapsed = Date.now() - startTime;
+    telemetry.requestFinished(false, totalElapsed, attempts, matchedPrefix);
     return c.json(
       {
         error: 'All federated free-tier nodes are temporarily unavailable or exceeded the failover budget.',

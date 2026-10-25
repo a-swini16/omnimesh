@@ -53,6 +53,10 @@ npx omnimesh init
 npx omnimesh doctor
 ```
 
+### Live dashboard
+
+Your router serves an operator dashboard at `https://<your-domain>/_omnimesh/dashboard`: node health, failovers, latency, free-tier quota bars and an incident timeline, refreshed every 3 seconds. Sign in with `OMNIMESH_STATUS_TOKEN` from your `.env`.
+
 ### 3. Watch real-time failover live in your terminal
 ```bash
 npx omnimesh chaos

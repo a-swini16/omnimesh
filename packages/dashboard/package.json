@@ -1,9 +1,6 @@
 {
   "name": "@omnimesh/dashboard",
   "version": "1.0.0",
-  "description": "Live status, telemetry, and quota dashboard for OmniMesh federations",
-  "main": "index.html",
-  "scripts": {
-    "build": "echo \"Dashboard static assets ready\""
-  }
+  "description": "Docs for the live OmniMesh dashboard, which the router serves at /_omnimesh/dashboard",
+  "scripts": {}
 }

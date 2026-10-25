@@ -125,10 +125,13 @@ export async function runInit(options: InitOptions = {}): Promise<boolean> {
   const envExamplePath = path.join(cwd, '.env.example');
 
   const jwtSecret = crypto.randomBytes(32).toString('hex');
+  const statusToken = crypto.randomBytes(24).toString('hex');
   const envContent = `# OmniMesh Secrets & Provider Credentials
 # Generated on ${new Date().toISOString()}
 OMNIMESH_DOMAIN="${domain}"
 GATEWAY_SECRET="${gatewaySecret}"
+# Sign-in token for the live dashboard at https://<domain>/_omnimesh/dashboard
+OMNIMESH_STATUS_TOKEN="${statusToken}"
 # During a secret rotation only: the old secret, still accepted by nodes (see SECURITY.md)
 GATEWAY_SECRET_PREVIOUS=""
 JWT_SECRET="${jwtSecret}"
@@ -156,7 +159,8 @@ ${hasCard ? 'CF_TUNNEL_TOKEN=""\nORACLE_HOST=""\nR2_ACCESS_KEY_ID=""\nR2_SECRET_
   // .env.example is committed, so every generated secret must be replaced
   const envExample = envContent
     .replace(gatewaySecret, 'generate-with-openssl-rand-hex-32')
-    .replace(jwtSecret, 'generate-with-openssl-rand-hex-32');
+    .replace(jwtSecret, 'generate-with-openssl-rand-hex-32')
+    .replace(statusToken, 'generate-with-openssl-rand-hex-24');
   fs.writeFileSync(envExamplePath, envExample, 'utf-8');
   console.log(pc.green(`✔ Created ${pc.bold('.env.example')}`));
 

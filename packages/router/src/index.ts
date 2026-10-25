@@ -10,6 +10,7 @@ export * from './quota-tracker.js';
 export * from './dispatcher.js';
 export * from './cron.js';
 export * from './rate-limiter.js';
+export * from './telemetry.js';
 
 // One router per isolate: rebuilding it per request would reset the in-memory circuit breaker
 // and re-parse the config inside the 10ms CPU budget

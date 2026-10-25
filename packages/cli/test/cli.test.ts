@@ -48,6 +48,9 @@ describe('OmniMesh CLI Suite (init, doctor, deploy, chaos, add/remove)', () => {
     const example = fs.readFileSync(path.join(tmpDir, '.env.example'), 'utf-8');
     expect(example).not.toContain(secret);
     expect(example).not.toContain(jwt);
+    const status = env.match(/OMNIMESH_STATUS_TOKEN="([^"]+)"/)![1];
+    expect(status.length).toBeGreaterThanOrEqual(32);
+    expect(example).not.toContain(status);
     expect(fs.statSync(envPath).mode & 0o077).toBe(0);
 
     // No-card mesh: no card-only providers, and quota-limited nodes carry their free-tier limits
