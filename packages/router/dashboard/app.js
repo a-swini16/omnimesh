@@ -1012,12 +1012,12 @@
     for (const p of s.pools) {
       pools[p.prefix] = p.nodes.map((n) => ({ provider: n.providerId || '', url: n.url, backup: n.isBackup, weight: n.weight }));
     }
-    return { profile: s.profile === 'with-card' ? 'with-card' : 'no-card', domain: s.domain, strategy: s.routerConfig.strategy, pools, fromLive: true };
+    return { profile: s.profile === 'with-card' ? 'with-card' : 'no-card', domain: s.domain, strategy: s.routerConfig.strategy, pools };
   }
   function builderDefaults(profile, domain, strategy) {
     const pools = {};
     for (const [prefix, list] of Object.entries(PROFILE_DEFAULTS[profile])) pools[prefix] = list.map((provider) => ({ provider, url: '', backup: false, weight: 1 }));
-    return { profile, domain: domain || '', strategy: strategy || 'priority', pools, fromLive: false };
+    return { profile, domain: domain || '', strategy: strategy || 'priority', pools };
   }
   function addBuilderNode(providerId) {
     const b = state.builder;

@@ -301,4 +301,13 @@ describe('@omnimesh/node Middleware Suite', () => {
       expect((await app.request('/x', { headers: { Authorization: `Bearer ${token}` } })).status).toBe(401);
     });
   });
+
+  it('[review] idempotency keeps binary request bodies byte-for-byte', async () => {
+    const app = new Hono();
+    app.use('*', idempotency({ store: new MemoryIdempotencyStore() }));
+    app.post('/upload', async (c) => c.json({ bytes: [...new Uint8Array(await c.req.arrayBuffer())] }, 201));
+    const payload = new Uint8Array([0xff, 0xfe, 0x00, 0x80, 0xc3]);
+    const res = await app.request('/upload', { method: 'POST', headers: { 'Idempotency-Key': 'bin-1' }, body: payload });
+    expect(((await res.json()) as any).bytes).toEqual([...payload]);
+  });
 });

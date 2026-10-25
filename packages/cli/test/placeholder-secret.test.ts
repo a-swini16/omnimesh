@@ -65,4 +65,13 @@ describe('[C-2] the gateway secret never goes to placeholder hosts', () => {
     expect(await runDoctor({ cwd: dir })).toBe(false);
     expect(() => createRouterApp({ config, gatewaySecret: 's'.repeat(40) })).toThrow(/placeholder/i);
   });
+
+  it('[review] deploy never sends the secret to a plain-http node', async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'omnimesh-http-'));
+    fs.writeFileSync(path.join(dir, 'omnimesh.config.yaml'), 'pools:\n  /api:\n    - https://api.example.com\n    - http://plain.example.com\n');
+    fs.writeFileSync(path.join(dir, '.env'), `GATEWAY_SECRET="${'s'.repeat(64)}"\n`);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
+    await runDeploy({ cwd: dir });
+    expect(sentSecretTo(fetchSpy)).toEqual(['https://api.example.com/health']);
+  });
 });

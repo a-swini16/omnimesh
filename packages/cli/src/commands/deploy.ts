@@ -111,6 +111,12 @@ export async function runDeploy(options: DeployOptions = {}) {
       let healthy = 0;
       for (const rawNode of nodes as any[]) {
         const url = (typeof rawNode === 'string' ? rawNode : rawNode.url).replace(/\/$/, '');
+        const { protocol, hostname } = new URL(url);
+        if (protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(hostname)) {
+          // Same rule as the router: the gateway secret never travels unencrypted
+          console.log(pc.red(`   ✖ ${url} must use https:// (skipped, the gateway secret is never sent over plain http)`));
+          continue;
+        }
         try {
           const res = await fetch(`${url}/health`, {
             headers: { 'X-Gateway-Secret': secret },

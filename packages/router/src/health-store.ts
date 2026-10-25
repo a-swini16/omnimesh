@@ -38,6 +38,14 @@ export class MemoryHealthStore implements HealthStore {
     this.healthyNodes.delete(url);
   }
 
+  /** Record an outage another router instance reported (e.g. via KV), unless a newer one is already known. */
+  adoptDead(url: string, deadSince: number, reason?: string): void {
+    const known = this.deadNodes.get(url);
+    if (known && known.deadSince >= deadSince) return;
+    this.deadNodes.set(url, { deadSince, reason: reason ?? 'reported by another router instance' });
+    this.healthyNodes.delete(url);
+  }
+
   async markNodeHealthy(url: string, latencyMs?: number): Promise<void> {
     this.deadNodes.delete(url);
     this.healthyNodes.set(url, { lastChecked: Date.now(), latencyMs });
@@ -99,20 +107,22 @@ export class KvHealthStore implements HealthStore {
   }
 
   async isNodeHealthy(url: string, circuitTtlMs: number): Promise<boolean> {
-    if (!(await this.memoryFallback.isNodeHealthy(url, circuitTtlMs))) return false;
-    if (!this.kv) return true;
-
-    try {
-      let entry = this.readCache.get(url);
-      if (!entry || Date.now() - entry.fetchedAt > this.readCacheMs) {
-        const raw = await this.kv.get(this.key(url));
-        entry = { deadSince: raw ? Number(raw) : null, fetchedAt: Date.now() };
-        this.readCache.set(url, entry);
+    if (this.kv) {
+      try {
+        let entry = this.readCache.get(url);
+        if (!entry || Date.now() - entry.fetchedAt > this.readCacheMs) {
+          const raw = await this.kv.get(this.key(url));
+          entry = { deadSince: raw ? Number(raw) : null, fetchedAt: Date.now() };
+          this.readCache.set(url, entry);
+        }
+        // Feed outages seen by other instances into local state, so the TTL and the single half-open
+        // probe apply here too instead of every instance resuming full traffic at once
+        if (entry.deadSince !== null) this.memoryFallback.adoptDead(url, entry.deadSince);
+      } catch {
+        // KV unavailable: fall back to what this instance knows
       }
-      return entry.deadSince === null || Date.now() - entry.deadSince > circuitTtlMs;
-    } catch {
-      return true;
     }
+    return this.memoryFallback.isNodeHealthy(url, circuitTtlMs);
   }
 
   async markNodeDead(url: string, reason?: string): Promise<void> {

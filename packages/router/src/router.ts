@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { isPlaceholderUrl, OMNIMESH_VERSION, type OmniMeshConfig } from '@omnimesh/core';
+import { isPlaceholderUrl, OMNIMESH_VERSION, sha256Hex, timingSafeEqual, type OmniMeshConfig } from '@omnimesh/core';
 import { MemoryHealthStore, type HealthStore } from './health-store.js';
 import { MemoryQuotaTracker, type QuotaTracker } from './quota-tracker.js';
 import { prepareBufferedRequest, fetchWithTimeout, BodyTooLargeError, DEFAULT_MAX_BODY_BYTES } from './dispatcher.js';
@@ -101,21 +101,7 @@ function isLoopback(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
 }
 
-function timingSafeEqual(a: string, b: string): boolean {
-  const enc = new TextEncoder();
-  const ab = enc.encode(a);
-  const bb = enc.encode(b);
-  let diff = ab.length ^ bb.length;
-  for (let i = 0; i < Math.max(ab.length, bb.length); i++) {
-    diff |= (ab[i % ab.length] ?? 0) ^ (bb[i % bb.length] ?? 0);
-  }
-  return diff === 0;
-}
 
-async function sha256Hex(input: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
-}
 
 /** A path belongs to a pool only on a segment boundary: /api and /api/x match /api, /apiary does not. */
 export function matchPool(pathname: string, prefixes: string[]): string | undefined {
@@ -133,6 +119,9 @@ export function createRouterApp(options: RouterOptions) {
   const random = options.random || Math.random;
   const strategy = config.router.strategy ?? 'priority';
   const telemetry = options.telemetry || new RouterTelemetry();
+  if (config.router.failureThreshold !== undefined) {
+    console.warn('[OmniMesh] router.failureThreshold is ignored: app-level 5xx never open a circuit (only timeouts, connection errors, 429 and 502-504 do). Remove it from the config.');
+  }
 
   // Validate gateway secret fail-closed
   const gatewaySecret = options.gatewaySecret || config.gatewaySecret || readEnv('GATEWAY_SECRET');
@@ -360,6 +349,8 @@ export function createRouterApp(options: RouterOptions) {
     const maxAttempts = Math.min(config.router.maxAttempts, candidateQueue.length);
     const totalBudgetMs = config.router.totalBudgetMs;
     let lastFailure: string | null = null;
+    // A read's app-level 5xx is kept so that, if no node does better, the client gets the app's real answer
+    let lastAppError: { response: Response; node: Candidate } | null = null;
 
     for (const node of candidateQueue) {
       const elapsed = Date.now() - startTime;
@@ -411,9 +402,16 @@ export function createRouterApp(options: RouterOptions) {
             return withTelemetry(response, node, attempts, Date.now() - startTime, credentials, toPublic(url.origin));
           }
 
-          // Release the connection; we are not going to read this body
-          await response.body?.cancel().catch(() => {});
-          if (isHardFailure) await healthStore.markNodeDead(node.url, lastFailure);
+          // The provider served (and counts) this request even though it failed
+          if (node.quota) await quotaTracker.recordRequest(node.quotaKey);
+          if (isHardFailure) {
+            // Release the connection; we are not going to read this body
+            await response.body?.cancel().catch(() => {});
+            await healthStore.markNodeDead(node.url, lastFailure);
+          } else {
+            await lastAppError?.response.body?.cancel().catch(() => {});
+            lastAppError = { response, node };
+          }
 
           // CRITICAL SAFETY CHECK: If mutating request without Idempotency-Key, DO NOT retry!
           if (!bufferedReq.canRetry) {
@@ -433,6 +431,7 @@ export function createRouterApp(options: RouterOptions) {
         }
 
         // SUCCESS! (200-499 excluding 429)
+        await lastAppError?.response.body?.cancel().catch(() => {});
         const latency = Date.now() - startTime;
         await healthStore.markNodeHealthy(node.url, latency);
         if (node.quota) await quotaTracker.recordRequest(node.quotaKey);
@@ -444,6 +443,8 @@ export function createRouterApp(options: RouterOptions) {
         // Network timeout, connection refused, or DNS failure
         const isTimeout = err.name === 'AbortError' || err.name === 'TimeoutError' || err.message?.includes('aborted');
         lastFailure = isTimeout ? `Timeout_${timeoutForThisAttempt}ms` : 'NetworkError';
+        // A timed-out request reached the provider and counts against its quota; a refused connection did not
+        if (isTimeout && node.quota) await quotaTracker.recordRequest(node.quotaKey);
         await healthStore.markNodeDead(node.url, isTimeout ? lastFailure : `NetError: ${err.message}`);
         telemetry.attemptFailed(node.url, node.label, matchedPrefix, lastFailure, true);
 
@@ -468,6 +469,11 @@ export function createRouterApp(options: RouterOptions) {
 
     // All attempts exhausted or budget exceeded
     const totalElapsed = Date.now() - startTime;
+    if (lastAppError) {
+      // The nodes were up and the app itself failed: pass its answer through instead of reporting an outage
+      telemetry.requestFinished(false, totalElapsed, attempts, matchedPrefix, lastAppError.node.label);
+      return withTelemetry(lastAppError.response, lastAppError.node, attempts, totalElapsed, credentials, toPublic(url.origin));
+    }
     telemetry.requestFinished(false, totalElapsed, attempts, matchedPrefix);
     return c.json(
       {

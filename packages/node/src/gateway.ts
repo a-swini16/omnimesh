@@ -1,4 +1,7 @@
 import type { Context, Next } from 'hono';
+import { timingSafeEqual } from '@omnimesh/core';
+
+export { timingSafeEqual };
 
 export interface GatewayAuthOptions {
   secret?: string;
@@ -40,20 +43,6 @@ export function validateGatewaySecretOrThrow(secret?: string): string {
   return resolved.trim();
 }
 
-/**
- * Constant-time string comparison so the secret cannot be guessed byte-by-byte via response timing.
- */
-export function timingSafeEqual(a: string, b: string): boolean {
-  const enc = new TextEncoder();
-  const ab = enc.encode(a);
-  const bb = enc.encode(b);
-  let diff = ab.length ^ bb.length;
-  const len = Math.max(ab.length, bb.length);
-  for (let i = 0; i < len; i++) {
-    diff |= (ab[i % ab.length] ?? 0) ^ (bb[i % bb.length] ?? 0);
-  }
-  return diff === 0;
-}
 
 /**
  * Hono Middleware to enforce X-Gateway-Secret validation.

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { createRouterApp } from '../src/router.js';
@@ -536,6 +536,52 @@ describe('OmniMesh Edge Router 3-Node Federation & Auto-Failover Gate', () => {
       // Diverts at 95% of the 20/day quota: 19 on netlify, then vercel takes over without any error
       expect(served.slice(0, 19).every((n) => n === 'netlify')).toBe(true);
       expect(served.slice(19).every((n) => n === 'vercel')).toBe(true);
+    });
+  });
+
+  describe('code review fixes', () => {
+    const cfg = (pool: any[]): OmniMeshConfig => ({
+      profile: 'no-card',
+      domain: 'api.mesh.local',
+      router: { timeoutMs: 1500, maxAttempts: 3, totalBudgetMs: 4000, circuitTtlMs: 30000, maxBufferBytes: 1048576, healthCheckIntervalSeconds: 60 },
+      pools: { '/api': pool },
+      database: { mode: 'managed', primary: 'neon', connectionUrlEnv: 'DATABASE_URL' },
+      cache: { provider: 'memory', urlEnv: 'REDIS_URL' },
+      storage: { provider: 'supabase' },
+      keepAlive: { enabled: false, intervalMinutes: 14, targets: [] },
+      rateLimit: { enabled: false, requestsPerMinute: 120 },
+    });
+
+    it('a GET that fails with an app 500 on every node returns the app response, not an outage 503', async () => {
+      node1ShouldFail = false;
+      const router = createRouterApp({ config: cfg([url1]), gatewaySecret: TEST_SECRET });
+      const res = await router.request('/api/buggy');
+      expect(res.status).toBe(500);
+      expect(await res.text()).toBe('bug in one endpoint');
+      expect(res.headers.get('X-Omni-Node')).toBe('node-1');
+    });
+
+    it('failed attempts count toward a provider quota, because the provider counts them too', async () => {
+      node1ShouldFail = true; // node 1 answers 503
+      const { MemoryQuotaTracker } = await import('../src/quota-tracker.js');
+      const quotaTracker = new MemoryQuotaTracker();
+      const router = createRouterApp({
+        config: cfg([{ url: url1, providerId: 'netlify', requestsPerDay: 10 }, url3]),
+        gatewaySecret: TEST_SECRET,
+        quotaTracker,
+      });
+      expect((await router.request('/api/data')).status).toBe(200); // served by node 2
+      expect((await quotaTracker.getUsage('netlify')).requestsToday).toBe(1);
+      node1ShouldFail = false;
+    });
+
+    it('warns that router.failureThreshold is ignored', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const c = cfg([url3]);
+      (c.router as any).failureThreshold = 5;
+      createRouterApp({ config: c, gatewaySecret: TEST_SECRET });
+      expect(warn.mock.calls.flat().join(' ')).toMatch(/failureThreshold is ignored/);
+      warn.mockRestore();
     });
   });
 });

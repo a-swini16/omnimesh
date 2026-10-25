@@ -1,4 +1,5 @@
 import type { Context, Next } from 'hono';
+import { sha256Hex } from '@omnimesh/core';
 
 export interface StoredResponse {
   status: number;
@@ -128,10 +129,6 @@ export class UpstashRedisIdempotencyStore implements IdempotencyStore {
   }
 }
 
-async function sha256Hex(input: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
-}
 
 export interface IdempotencyOptions {
   store?: IdempotencyStore;
@@ -174,8 +171,9 @@ export function idempotency(options: IdempotencyOptions = {}) {
     // Scope the key to caller + route so one client cannot replay another client's stored response
     const caller = c.req.header('authorization') || '';
     const key = await sha256Hex(`${c.req.method}\n${c.req.path}\n${caller}\n${rawKey}`);
-    // Hono caches the body, so the handler can still read it afterwards
-    const requestHash = await sha256Hex(await c.req.text());
+    // Hash the raw bytes: Hono caches this read, and an arrayBuffer cache serves later text/json/arrayBuffer
+    // reads unchanged (a text cache would re-encode binary bodies and corrupt them)
+    const requestHash = await sha256Hex(await c.req.arrayBuffer());
     const reusedWithDifferentBody = (stored: StoredResponse) =>
       stored.requestHash !== undefined && stored.requestHash !== requestHash;
     const keyReused = () =>

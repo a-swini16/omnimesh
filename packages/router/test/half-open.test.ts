@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { MemoryHealthStore } from '../src/health-store.js';
+import { MemoryHealthStore, KvHealthStore } from '../src/health-store.js';
 
 describe('[M-5] half-open circuit lets exactly one probe through', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -35,5 +35,19 @@ describe('[M-5] half-open circuit lets exactly one probe through', () => {
     expect(await store.isNodeHealthy(URL, 30_000)).toBe(true);
     at(73_000); // that probe never reported back (e.g. not attempted): slot frees after 10 s
     expect(await store.isNodeHealthy(URL, 30_000)).toBe(true);
+  });
+
+  it('[review] an instance that only saw the outage in KV also lets just one probe through', async () => {
+    const kv = new Map<string, string>();
+    const fakeKv = { get: async (k: string) => kv.get(k) ?? null, put: async (k: string, v: string) => void kv.set(k, v), delete: async (k: string) => void kv.delete(k) };
+    at(0);
+    await new KvHealthStore(fakeKv).markNodeDead(URL, 'Timeout'); // isolate A publishes the outage
+
+    const isolateB = new KvHealthStore(fakeKv, { readCacheMs: 0 });
+    at(5_000);
+    expect(await isolateB.isNodeHealthy(URL, 30_000)).toBe(false);
+    at(31_000);
+    expect(await isolateB.isNodeHealthy(URL, 30_000)).toBe(true); // one probe
+    expect(await isolateB.isNodeHealthy(URL, 30_000)).toBe(false); // not the whole wave
   });
 });
