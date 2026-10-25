@@ -287,6 +287,9 @@ importers:
       commander:
         specifier: ^13.1.0
         version: 13.1.0
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
       hono:
         specifier: ^4.7.2
         version: 4.13.13

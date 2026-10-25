@@ -7,6 +7,7 @@ import { runStatus } from './commands/status.js';
 import { runDeploy } from './commands/deploy.js';
 import { runAddProvider, runRemoveProvider } from './commands/add-provider.js';
 import { runDbPromote } from './commands/db-promote.js';
+import { runUpCommand } from './commands/up.js';
 
 export * from './commands/init.js';
 export * from './commands/doctor.js';
@@ -93,6 +94,15 @@ export function createProgram() {
     .option('-f, --force', 'Force promotion without interactive confirmation')
     .action(async (opts) => {
       if ((await runDbPromote({ force: opts.force })) === false) process.exitCode = 1;
+    });
+
+  program
+    .command('up')
+    .description('Host your backend on multiple clouds: opens a setup page in your browser')
+    .option('--port <port>', 'Local port for the setup page', '4747')
+    .option('--no-open', 'Print the link instead of opening the browser')
+    .action(async (opts) => {
+      await runUpCommand({ port: Number(opts.port), open: opts.open });
     });
 
   return program;

@@ -81,68 +81,42 @@ flowchart LR
 
 ## Quick start
 
-### Try the live demo locally (1 command)
+### Host your backend in 3 steps
 
-To test the multi-cloud mesh and open the live operator dashboard right on your computer:
+You need: a backend in a **public GitHub repo** that listens on the `PORT` environment variable (for example `app.listen(process.env.PORT)`).
 
 ```bash
-git clone https://github.com/a-swini16/omnimesh.git
-cd omnimesh
-pnpm install
+git clone https://github.com/a-swini16/omnimesh.git && cd omnimesh && pnpm install
+node packages/cli/bin/omnimesh.js up
+```
+
+A setup page opens in your browser:
+
+1. **Paste your GitHub repo link.** OmniMesh detects Node.js, Python or Docker by itself.
+2. **Connect your clouds.** Create a free account on Koyeb, Render and Cloudflare (no credit card) and paste one API token for each. The page shows exactly where to click for each token.
+3. **Click Deploy.** OmniMesh builds your backend on every cloud, puts the router on Cloudflare in front, checks that it answers, and gives you **one URL** for your app plus the **dashboard** to manage it.
+
+To ship new code, run `omnimesh up` again and click **Redeploy latest code**. Every cloud gets the update, and your URL and secrets stay the same.
+
+> Why paste tokens at all? Each cloud requires you to own your account. That's the only manual part; OmniMesh does everything after it.
+
+### Try it without any accounts
+
+```bash
 pnpm dev
 ```
-👉 Open **`http://localhost:8788/_omnimesh/dashboard`** in your browser and enter token: **`dev-token`**.
 
----
+This starts a local demo mesh (three fake servers and the router) and opens the dashboard at `http://localhost:8788/_omnimesh/dashboard` (sign in with `dev-token`, which only works in this local demo). Use **Kill Koyeb** to watch traffic fail over live.
 
-### Using OmniMesh in your own project
-
-> Run the CLI from a clone:
->
-> ```bash
-> alias omnimesh="node $PWD/packages/cli/bin/omnimesh.js"
-> ```
-
-In your app's folder:
-
-```bash
-omnimesh init --no-card --domain api.yourapp.com   # config + .env with generated secrets
-```
-
-1. Deploy your app on Koyeb, Render, Vercel, Netlify and Deno Deploy (each one deploys from GitHub). Add [`@omnimesh/node`](packages/node) so every node checks the gateway secret and serves `/health`.
-2. Paste each app's URL into `omnimesh.config.yaml`, or build the file in the dashboard's **Setup** page.
-3. Check everything:
-
-   ```bash
-   omnimesh doctor
-   ```
-
-4. Deploy the router from `packages/router` (copy `wrangler.toml.example` to `wrangler.toml` first):
-
-   ```bash
-   npx wrangler deploy
-   ```
-
-5. Verify every pool, then open `/_omnimesh/dashboard`:
-
-   ```bash
-   omnimesh deploy
-   ```
-
-The [no-card guide](docs/zero-card-guide.md) walks through every account and secret. To see failover without any accounts, run:
-
-```bash
-omnimesh chaos
-```
+### All commands
 
 | Command | What it does |
 | :--- | :--- |
-| `omnimesh init [--no-card \| --with-card] [--keep-alive] [--force]` | Writes the config and `.env` with generated secrets; refuses to overwrite without `--force` |
-| `omnimesh doctor` | Finds placeholders, weak or missing secrets, unknown providers and invalid pools |
-| `omnimesh deploy` | Shows how each provider deploys, then checks `/health` on every node (exit code 1 if a pool has no healthy node) |
+| `omnimesh up` | **Start here.** Setup page: give your GitHub repo, connect clouds, deploy or redeploy |
 | `omnimesh status` | Live health and latency for every node |
+| `omnimesh doctor` | Finds weak or missing secrets, unknown providers and invalid config |
 | `omnimesh chaos` | Kills a local node and shows failover in your terminal |
-| `omnimesh add-provider <id> --url <url>` | Adds a node; adding `oracle` switches to the with-card profile |
+| `omnimesh init` / `add-provider` / `deploy` | Manual setup, if you already host your backend somewhere and only want the router |
 
 ## Tested under load
 

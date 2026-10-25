@@ -324,6 +324,101 @@
     return h('div', { class: 'card kpi' }, h('div', { class: 'kpi-label' }, iconName ? icon(iconName, 14) : null, label), h('div', { class: 'kpi-value', text: value }), h('div', { class: 'kpi-sub', text: sub || '' }));
   }
 
+  let devLogText = 'Ready. Click a button below to test your federated multi-cloud cluster in real time.';
+  let devLogClass = 'ok';
+
+  function devControlPanel(s) {
+    const logBox = h('div', {
+      id: 'dev-log-box',
+      class: 'banner ' + (devLogClass === 'bad' ? 'bad' : 'ok'),
+      style: { marginTop: '12px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }
+    }, h('span', { class: 'dot ' + (devLogClass === 'bad' ? 'bad' : 'ok') }), h('span', { text: devLogText }));
+
+    const sendBtn = h('button', {
+      class: 'btn btn-primary',
+      type: 'button',
+      onclick: async () => {
+        devLogText = 'Sending request through edge router to /api/todos...';
+        devLogClass = 'ok';
+        poll();
+        try {
+          const t0 = performance.now();
+          const res = await fetch('/api/todos');
+          const elapsed = Math.round(performance.now() - t0);
+          const data = await res.json();
+          devLogText = '✔ 200 OK — Request answered by ' + String(data.provider || 'unknown').toUpperCase() + ' (port ' + data.port + ') in ' + elapsed + 'ms via Edge Router!';
+          devLogClass = 'ok';
+          toast('Request succeeded via ' + data.provider);
+        } catch (err) {
+          devLogText = '✖ Request failed: ' + err.message;
+          devLogClass = 'bad';
+        }
+        poll();
+      }
+    }, '⚡ Send Live Request');
+
+    const killBtn = h('button', {
+      class: 'btn btn-outline',
+      type: 'button',
+      style: { borderColor: 'var(--bad)', color: 'var(--bad)' },
+      onclick: async () => {
+        try {
+          await fetch('/_omnimesh/dev/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: 'koyeb' })
+          });
+          const t0 = performance.now();
+          const res = await fetch('/api/todos');
+          const elapsed = Math.round(performance.now() - t0);
+          const data = await res.json();
+          devLogText = '💥 Simulated outage on KOYEB! Router automatically failed over to ' + String(data.provider || 'backup').toUpperCase() + ' (port ' + data.port + ') in ' + elapsed + 'ms!';
+          devLogClass = 'bad';
+          toast('Failover triggered: routed to ' + data.provider);
+        } catch (err) {
+          devLogText = 'Outage injected: ' + err.message;
+          devLogClass = 'bad';
+        }
+        poll();
+      }
+    }, '💥 Kill Koyeb (Simulate Outage)');
+
+    const reviveBtn = h('button', {
+      class: 'btn btn-outline',
+      type: 'button',
+      onclick: async () => {
+        await fetch('/_omnimesh/dev/reset', { method: 'POST' });
+        devLogText = '✔ All nodes revived! Koyeb, Render, and Vercel are all active and healthy.';
+        devLogClass = 'ok';
+        toast('All nodes revived');
+        poll();
+      }
+    }, '🔄 Revive All Nodes');
+
+    return h('div', { class: 'card', style: { marginBottom: '18px', borderLeft: '4px solid var(--accent)' } },
+      h('div', { class: 'card-head' },
+        h('h2', { text: '🚀 Interactive Cluster Test & Live Controls' }),
+        h('span', { class: 'pill accent', text: 'Local Cluster Active' }),
+        h('div', { class: 'spacer' }),
+        h('span', { class: 'muted small', text: 'Router: http://localhost:8788' })
+      ),
+      h('div', { class: 'card-body' },
+        h('p', { class: 'muted', style: { marginBottom: '14px', fontSize: '13.5px', lineHeight: '1.5' },
+          text: 'This dashboard monitors your multi-cloud edge mesh in real-time. Incoming traffic at :8788 is load-balanced across multiple providers. If any provider goes down, OmniMesh reroutes traffic in sub-3 seconds without downtime.'
+        }),
+        h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' } },
+          sendBtn, killBtn, reviveBtn
+        ),
+        logBox,
+        h('div', { style: { marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--border)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', fontSize: '12.5px' } },
+          h('div', {}, h('strong', { text: '1. Overview Tab: ' }), h('span', { class: 'muted', text: 'Shows live node health, latency, request counts, and failovers.' })),
+          h('div', {}, h('strong', { text: '2. Providers Tab: ' }), h('span', { class: 'muted', text: 'View 10+ free cloud limits and signup guides.' })),
+          h('div', {}, h('strong', { text: '3. Setup Tab: ' }), h('span', { class: 'muted', text: 'Generate omnimesh.config.yaml with your own real cloud endpoints.' }))
+        )
+      )
+    );
+  }
+
   // ---------------------------------------------------------------- pages
 
   const PAGES = {
@@ -342,6 +437,7 @@
 
         append(view, [
           banners(s),
+          s.demo ? devControlPanel(s) : null,
           h(
             'div',
             { class: 'kpis', style: { marginTop: alerts(s).length ? '16px' : '0' } },
@@ -1394,8 +1490,11 @@
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden && state.token) poll();
     });
+    // The demo login only exists for the local dev cluster; real deployments never show it
     const devBtn = $('dev-token-btn');
-    if (devBtn) {
+    const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+    if (devBtn && !isLocal) devBtn.remove();
+    if (devBtn && isLocal) {
       devBtn.addEventListener('click', () => {
         $('token').value = 'dev-token';
         state.token = 'dev-token';

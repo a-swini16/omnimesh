@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>OmniMesh · Host your backend</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="wrap">
+  <header class="top">
+    <div class="mark" aria-hidden="true"></div>
+    <div>
+      <h1>Host your backend on multiple clouds</h1>
+      <p class="muted">Give OmniMesh your GitHub repo. It deploys it on every cloud you connect, puts one URL in front, and switches clouds automatically if one goes down.</p>
+    </div>
+  </header>
+
+  <div id="locked" class="card notice" hidden>
+    <strong>Open the link from your terminal.</strong>
+    <p class="muted">For your safety this page only works from the exact link <code>omnimesh up</code> printed (it contains a one-time key).</p>
+  </div>
+
+  <section id="already" class="card" hidden></section>
+
+  <form id="form" class="steps" hidden>
+    <section class="card step">
+      <div class="step-head"><span class="num">1</span><h2>Your backend</h2></div>
+      <label for="repo">GitHub repository link</label>
+      <input id="repo" placeholder="https://github.com/you/your-backend" required autocomplete="off" spellcheck="false">
+      <p class="hint">The repo must be <strong>public</strong>, and your app must listen on the <code>PORT</code> environment variable (for example <code>app.listen(process.env.PORT)</code>). OmniMesh detects Node.js, Python and Docker by itself.</p>
+      <details>
+        <summary>Advanced (optional)</summary>
+        <div class="grid">
+          <div><label for="branch">Branch</label><input id="branch" placeholder="default branch" autocomplete="off"></div>
+          <div><label for="start">Start command</label><input id="start" placeholder="needed for Python, e.g. uvicorn main:app --host 0.0.0.0 --port $PORT" autocomplete="off"></div>
+        </div>
+      </details>
+    </section>
+
+    <section class="card step">
+      <div class="step-head"><span class="num">2</span><h2>Connect your clouds</h2><span class="pill">all free, no credit card</span></div>
+      <p class="muted">Create a free account on each one and paste an API token. Connect at least <strong>two hosting clouds</strong> so your app stays up when one fails.</p>
+      <div id="providers"></div>
+      <label class="check"><input id="remember" type="checkbox" checked> Remember these tokens on this computer (saved in <code>.env</code>, never uploaded)</label>
+    </section>
+
+    <section class="card step">
+      <div class="step-head"><span class="num">3</span><h2>Deploy</h2></div>
+      <div id="form-error" class="error" role="alert"></div>
+      <button id="deploy" class="btn primary" type="submit">Deploy my backend</button>
+      <p class="hint">Takes about 3 to 10 minutes while each cloud builds your app. You can keep this page open and watch.</p>
+    </section>
+  </form>
+
+  <section id="progress" class="card" hidden>
+    <div class="step-head"><span class="spinner" id="spinner"></span><h2 id="progress-title">Deploying…</h2></div>
+    <ol id="log" class="log"></ol>
+  </section>
+
+  <section id="done" class="card done" hidden></section>
+</main>
+<script src="/app.js" defer></script>
+</body>
+</html>

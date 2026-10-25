@@ -92,9 +92,30 @@ const routerApp = createRouterApp({
   config,
   gatewaySecret: GATEWAY_SECRET,
   statusToken: STATUS_TOKEN,
+  demo: true,
 });
 
-const routerServer = serve({ fetch: routerApp.fetch, port: 8788 }, () => {
+const masterApp = new Hono();
+
+// Interactive dev endpoints for live dashboard simulation
+masterApp.post('/_omnimesh/dev/toggle', async (c) => {
+  const { name } = await c.req.json().catch(() => ({}));
+  const node = NODES.find((n) => n.name === name);
+  if (node) {
+    node.alive = !node.alive;
+    return c.json({ name: node.name, alive: node.alive, port: node.port });
+  }
+  return c.json({ error: 'Node not found' }, 404);
+});
+
+masterApp.post('/_omnimesh/dev/reset', (c) => {
+  NODES.forEach((n) => (n.alive = true));
+  return c.json({ success: true, nodes: NODES });
+});
+
+masterApp.all('*', (c) => routerApp.fetch(c.req.raw));
+
+const routerServer = serve({ fetch: masterApp.fetch, port: 8788 }, () => {
   console.log(`
 ===================================================================
   🚀 OmniMesh Local Cluster Running!

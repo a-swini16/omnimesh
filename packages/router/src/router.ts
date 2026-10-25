@@ -19,6 +19,8 @@ export interface RouterOptions {
   /** Random source for weighted selection (injectable for tests). */
   random?: () => number;
   telemetry?: RouterTelemetry;
+  /** Local demo cluster only: the dashboard shows its simulate-outage controls */
+  demo?: boolean;
 }
 
 // Headers that describe a single hop and must not be forwarded, plus ones the router owns
@@ -232,6 +234,7 @@ export function createRouterApp(options: RouterOptions) {
       domain: config.domain,
       instance: { startedAt: new Date(telemetry.startedAt).toISOString(), uptimeSeconds: Math.floor((Date.now() - telemetry.startedAt) / 1000) },
       version: OMNIMESH_VERSION,
+      demo: Boolean(options.demo),
       routerConfig: {
         ...config.router,
         maxBodyBytes: config.router.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
