@@ -1,17 +1,6 @@
-import { spawn } from 'node:child_process';
+import { openBrowser } from '../browser.js';
 import pc from 'picocolors';
 import { startWizard } from '../up/server.js';
-
-/** Open a URL in the default browser without going through a shell. */
-function openBrowser(url: string): void {
-  const [cmd, args] =
-    process.platform === 'darwin' ? ['open', [url]] : process.platform === 'win32' ? ['explorer.exe', [url]] : ['xdg-open', [url]];
-  try {
-    spawn(cmd, args as string[], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
-  } catch {
-    // no browser available: the link is printed anyway
-  }
-}
 
 export async function runUpCommand(options: { port?: number; open?: boolean; cwd?: string } = {}) {
   const cwd = options.cwd || process.cwd();

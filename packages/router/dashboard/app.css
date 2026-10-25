@@ -275,3 +275,10 @@ nav { flex: 1; overflow-y: auto; }
   .event .when { grid-column: 2; order: 3; }
   .event .count { grid-column: 2; }
 }
+
+.glossary { margin: 0; display: grid; gap: 4px 0; }
+.glossary dt { font-weight: 650; margin-top: 12px; }
+.glossary dd { margin: 0; color: var(--muted); }
+.advanced { margin-top: 16px; }
+.advanced > summary { cursor: pointer; color: var(--muted); font-weight: 600; padding: 8px 0; }
+.advanced > p { margin: 4px 0 12px; }

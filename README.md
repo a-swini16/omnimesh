@@ -23,6 +23,24 @@
 
 ---
 
+## What OmniMesh does for you
+
+1. **You give it your backend's GitHub link.**
+2. **It hosts your backend on several free clouds at once and gives you one URL.**
+3. **If a cloud goes down or runs out of free quota, another one answers.** Your users don't notice.
+
+<!-- STATUS:START -->
+**Works today**
+- `omnimesh up`: a setup page that deploys a public GitHub repo (Node.js, Python or Docker) to Koyeb and Render, puts the router on Cloudflare in front, and gives you one URL. Run it again to redeploy.
+- Automatic failover, switching before free limits run out, safe retries for payments, rate limits.
+- A live dashboard you open already signed in (`omnimesh open`).
+
+**Coming next**
+- Health checks with no traffic, a safe "pause one server" failover test, and a lock indicator.
+- More clouds deployed for you: Vercel, Oracle Cloud Always Free; free databases on Neon and Upstash.
+- `omnimesh destroy`, and `npx omnimesh` once published to npm.
+<!-- STATUS:END -->
+
 ## Why OmniMesh
 
 AWS is powerful, but complex, expensive, and locks you into a single vendor. Running resilient infrastructure shouldn't require thousands of dollars in cloud bills or a team of DevOps engineers.
@@ -100,23 +118,17 @@ To ship new code, run `omnimesh up` again and click **Redeploy latest code**. Ev
 
 > Why paste tokens at all? Each cloud requires you to own your account. That's the only manual part; OmniMesh does everything after it.
 
-### Try it without any accounts
-
-```bash
-pnpm dev
-```
-
-This starts a local demo mesh (three fake servers and the router) and opens the dashboard at `http://localhost:8788/_omnimesh/dashboard` (sign in with `dev-token`, which only works in this local demo). Use **Kill Koyeb** to watch traffic fail over live.
-
 ### All commands
 
 | Command | What it does |
 | :--- | :--- |
 | `omnimesh up` | **Start here.** Setup page: give your GitHub repo, connect clouds, deploy or redeploy |
+| `omnimesh open` | Opens your dashboard, already signed in |
+| `omnimesh token [--rotate]` | Shows your dashboard sign-in key, or replaces it on the live router |
+| `omnimesh deploy` | Redeploys the latest code to every cloud (no page needed) |
 | `omnimesh status` | Live health and latency for every node |
 | `omnimesh doctor` | Finds weak or missing secrets, unknown providers and invalid config |
-| `omnimesh chaos` | Kills a local node and shows failover in your terminal |
-| `omnimesh init` / `add-provider` / `deploy` | Manual setup, if you already host your backend somewhere and only want the router |
+| `omnimesh init` / `add-provider` | Advanced manual setup, if you host your backend yourself and only want the router |
 
 ## Tested under load
 

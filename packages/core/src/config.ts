@@ -16,6 +16,13 @@ export function isPlaceholderUrl(url: string): boolean {
   }
 }
 
+export const DEFAULT_HEALTH_PATH = '/health';
+
+/** The path used to check a node (string nodes and nodes without healthPath use /health). */
+export function nodeHealthPath(node: string | { healthPath?: string }): string {
+  return typeof node === 'string' ? DEFAULT_HEALTH_PATH : node.healthPath ?? DEFAULT_HEALTH_PATH;
+}
+
 export const CandidateNodeSchema = z.union([
   z.string().url(),
   z.object({
@@ -23,6 +30,9 @@ export const CandidateNodeSchema = z.union([
     providerId: z.string().optional(),
     weight: z.number().int().min(1).max(100).default(1),
     isBackup: z.boolean().default(false),
+    // Path the router and CLI use to check this server. Any answer below 500 counts as online,
+    // so a backend without a health route still works (a 404 proves it is running).
+    healthPath: z.string().regex(/^\/[^\s]*$/, 'healthPath must start with "/"').optional(),
     // Free-tier request quota for this provider account; the router moves traffic away at 95%
     requestsPerDay: z.number().int().positive().optional(),
     requestsPerMonth: z.number().int().positive().optional(),

@@ -5,6 +5,7 @@
 
   const TOKEN_KEY = 'omnimesh.statusToken';
   const THEME_KEY = 'omnimesh.theme';
+  const INTRO_KEY = 'omnimesh.introDismissed';
   const POLL_MS = 3000;
 
   const state = {
@@ -19,6 +20,8 @@
     providerFilter: 'all',
     providerSearch: '',
     builder: null,
+    testResult: '',
+    lastSignature: '',
     pendingBuilderAdd: null,
   };
 
@@ -105,6 +108,7 @@
     arrow: [['path', { d: 'M5 12h14M13 6l6 6-6 6' }]],
     globe: [['circle', { cx: 12, cy: 12, r: 10 }], ['path', { d: 'M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z' }]],
     minus: [['path', { d: 'M5 12h14' }]],
+    help: [['circle', { cx: 12, cy: 12, r: 10 }], ['path', { d: 'M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01' }]],
   };
   function icon(name, size) {
     const s = size || 16;
@@ -213,18 +217,21 @@
     return parts.slice(0, 3).join(' · ');
   }
 
-  /** serving | standby | down | quota */
+  /** serving | standby (a checked backup) | down | quota | paused | unchecked (no check has run yet) */
   function nodeState(n) {
+    if (n.state === 'paused') return 'paused';
     if (n.state === 'down') return 'down';
     if (n.quota && n.quota.percentUsed >= 95) return 'quota';
-    if (n.state === 'healthy') return 'serving';
-    return 'standby';
+    if (n.state === 'healthy') return n.isBackup ? 'standby' : 'serving';
+    return 'unchecked';
   }
   const STATE_VIEW = {
-    serving: { cls: 'ok', label: 'Serving' },
-    standby: { cls: 'idle', label: 'Standby' },
-    down: { cls: 'bad', label: 'Down' },
-    quota: { cls: 'warn', label: 'Quota reached' },
+    serving: { cls: 'ok', label: 'Online' },
+    standby: { cls: 'idle', label: 'Backup, ready' },
+    down: { cls: 'bad', label: 'Offline' },
+    quota: { cls: 'warn', label: 'Free limit reached' },
+    paused: { cls: 'warn', label: 'Paused by you' },
+    unchecked: { cls: 'idle', label: 'Not checked yet' },
   };
   function statePill(n) {
     const v = STATE_VIEW[nodeState(n)];
@@ -324,107 +331,12 @@
     return h('div', { class: 'card kpi' }, h('div', { class: 'kpi-label' }, iconName ? icon(iconName, 14) : null, label), h('div', { class: 'kpi-value', text: value }), h('div', { class: 'kpi-sub', text: sub || '' }));
   }
 
-  let devLogText = 'Ready. Click a button below to test your federated multi-cloud cluster in real time.';
-  let devLogClass = 'ok';
-
-  function devControlPanel(s) {
-    const logBox = h('div', {
-      id: 'dev-log-box',
-      class: 'banner ' + (devLogClass === 'bad' ? 'bad' : 'ok'),
-      style: { marginTop: '12px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }
-    }, h('span', { class: 'dot ' + (devLogClass === 'bad' ? 'bad' : 'ok') }), h('span', { text: devLogText }));
-
-    const sendBtn = h('button', {
-      class: 'btn btn-primary',
-      type: 'button',
-      onclick: async () => {
-        devLogText = 'Sending request through edge router to /api/todos...';
-        devLogClass = 'ok';
-        poll();
-        try {
-          const t0 = performance.now();
-          const res = await fetch('/api/todos');
-          const elapsed = Math.round(performance.now() - t0);
-          const data = await res.json();
-          devLogText = '✔ 200 OK — Request answered by ' + String(data.provider || 'unknown').toUpperCase() + ' (port ' + data.port + ') in ' + elapsed + 'ms via Edge Router!';
-          devLogClass = 'ok';
-          toast('Request succeeded via ' + data.provider);
-        } catch (err) {
-          devLogText = '✖ Request failed: ' + err.message;
-          devLogClass = 'bad';
-        }
-        poll();
-      }
-    }, '⚡ Send Live Request');
-
-    const killBtn = h('button', {
-      class: 'btn btn-outline',
-      type: 'button',
-      style: { borderColor: 'var(--bad)', color: 'var(--bad)' },
-      onclick: async () => {
-        try {
-          await fetch('/_omnimesh/dev/toggle', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: 'koyeb' })
-          });
-          const t0 = performance.now();
-          const res = await fetch('/api/todos');
-          const elapsed = Math.round(performance.now() - t0);
-          const data = await res.json();
-          devLogText = '💥 Simulated outage on KOYEB! Router automatically failed over to ' + String(data.provider || 'backup').toUpperCase() + ' (port ' + data.port + ') in ' + elapsed + 'ms!';
-          devLogClass = 'bad';
-          toast('Failover triggered: routed to ' + data.provider);
-        } catch (err) {
-          devLogText = 'Outage injected: ' + err.message;
-          devLogClass = 'bad';
-        }
-        poll();
-      }
-    }, '💥 Kill Koyeb (Simulate Outage)');
-
-    const reviveBtn = h('button', {
-      class: 'btn btn-outline',
-      type: 'button',
-      onclick: async () => {
-        await fetch('/_omnimesh/dev/reset', { method: 'POST' });
-        devLogText = '✔ All nodes revived! Koyeb, Render, and Vercel are all active and healthy.';
-        devLogClass = 'ok';
-        toast('All nodes revived');
-        poll();
-      }
-    }, '🔄 Revive All Nodes');
-
-    return h('div', { class: 'card', style: { marginBottom: '18px', borderLeft: '4px solid var(--accent)' } },
-      h('div', { class: 'card-head' },
-        h('h2', { text: '🚀 Interactive Cluster Test & Live Controls' }),
-        h('span', { class: 'pill accent', text: 'Local Cluster Active' }),
-        h('div', { class: 'spacer' }),
-        h('span', { class: 'muted small', text: 'Router: http://localhost:8788' })
-      ),
-      h('div', { class: 'card-body' },
-        h('p', { class: 'muted', style: { marginBottom: '14px', fontSize: '13.5px', lineHeight: '1.5' },
-          text: 'This dashboard monitors your multi-cloud edge mesh in real-time. Incoming traffic at :8788 is load-balanced across multiple providers. If any provider goes down, OmniMesh reroutes traffic in sub-3 seconds without downtime.'
-        }),
-        h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' } },
-          sendBtn, killBtn, reviveBtn
-        ),
-        logBox,
-        h('div', { style: { marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--border)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', fontSize: '12.5px' } },
-          h('div', {}, h('strong', { text: '1. Overview Tab: ' }), h('span', { class: 'muted', text: 'Shows live node health, latency, request counts, and failovers.' })),
-          h('div', {}, h('strong', { text: '2. Providers Tab: ' }), h('span', { class: 'muted', text: 'View 10+ free cloud limits and signup guides.' })),
-          h('div', {}, h('strong', { text: '3. Setup Tab: ' }), h('span', { class: 'muted', text: 'Generate omnimesh.config.yaml with your own real cloud endpoints.' }))
-        )
-      )
-    );
-  }
-
   // ---------------------------------------------------------------- pages
 
   const PAGES = {
     overview: {
       title: 'Overview',
-      sub: 'Live state of your free-tier mesh',
+      sub: 'Your API and the servers behind it',
       group: 'Monitor',
       icon: 'overview',
       render(view, s) {
@@ -433,21 +345,29 @@
         const down = nodes.filter((n) => n.state === 'down').length;
         const serving = nodes.filter((n) => nodeState(n) === 'serving').length;
         const atQuota = nodes.filter((n) => nodeState(n) === 'quota').length;
+        const backups = nodes.filter((n) => nodeState(n) === 'standby').length;
+        const unchecked = nodes.filter((n) => nodeState(n) === 'unchecked').length;
+        const paused = nodes.filter((n) => nodeState(n) === 'paused').length;
         const rate = t.requests ? (t.succeeded / t.requests) * 100 : null;
 
         append(view, [
           banners(s),
-          s.demo ? devControlPanel(s) : null,
+          getItem('local', INTRO_KEY) ? null : firstRunCard(s),
           h(
             'div',
-            { class: 'kpis', style: { marginTop: alerts(s).length ? '16px' : '0' } },
+            { class: 'kpis', style: { marginTop: alerts(s).length || !getItem('local', INTRO_KEY) ? '16px' : '0' } },
             kpi('Requests', fmt(t.requests), fmt(t.rateLimited) + ' rate-limited · ' + fmt(t.rejected) + ' rejected', 'activity'),
             kpi('Success rate', rate === null ? '–' : rate.toFixed(rate >= 99.95 || rate < 10 ? 1 : 2) + '%', fmt(t.failed) + ' failed', 'check'),
-            kpi('Failovers', fmt(t.failovers), 'answered by another node', 'routing'),
-            kpi('Latency p95', s.latency.samples ? ms(s.latency.p95) : '–', s.latency.samples ? 'p50 ' + ms(s.latency.p50) + ' · p99 ' + ms(s.latency.p99) : 'no requests yet', 'health'),
-            kpi('Nodes up', nodes.length - down + ' / ' + nodes.length, [down && down + ' down', serving + ' serving', atQuota && atQuota + ' at quota', nodes.length - down - serving - atQuota + ' standby'].filter(Boolean).join(' · '), 'providers')
+            kpi('Times a backup answered', fmt(t.failovers), 'a server failed and another one took over', 'routing'),
+            kpi('Response time', s.latency.samples ? ms(s.latency.p95) : '–', s.latency.samples ? '95% of requests were faster than this' : 'no requests yet', 'health'),
+            kpi(
+              'Servers online',
+              serving + backups + atQuota + ' / ' + nodes.length,
+              [down && down + ' offline', paused && paused + ' paused', atQuota && atQuota + ' at free limit', backups && backups + ' backup', unchecked && unchecked + ' not checked yet'].filter(Boolean).join(' · ') || 'all answering',
+              'providers'
+            )
           ),
-          h('div', { class: 'section-title' }, h('h2', { text: 'Mesh map' }), h('span', { class: 'count', text: s.routerConfig.strategy === 'weighted' ? 'weighted load balancing' : 'priority failover' })),
+          h('div', { class: 'section-title' }, h('h2', { text: 'Your servers' }), h('span', { class: 'count', text: s.routerConfig.strategy === 'weighted' ? 'traffic is spread across them' : 'the first one answers; the others are backups' })),
           meshMap(s),
           h(
             'div',
@@ -460,8 +380,8 @@
     },
 
     routing: {
-      title: 'Routing',
-      sub: 'Pools, nodes and how traffic is spread',
+      title: 'Servers',
+      sub: 'Every server behind your API, and how traffic reaches them',
       group: 'Monitor',
       icon: 'routing',
       badge: (s) => {
@@ -474,9 +394,9 @@
           h(
             'div',
             { class: 'grid-3', style: { marginBottom: '16px' } },
-            kpi('Strategy', cfg.strategy === 'weighted' ? 'Weighted' : 'Priority', cfg.strategy === 'weighted' ? 'load spread by weight across healthy nodes' : 'first healthy node in order; others are failover'),
-            kpi('Per-node timeout', ms(cfg.timeoutMs), 'up to ' + cfg.maxAttempts + ' attempts within ' + ms(cfg.totalBudgetMs)),
-            kpi('Dead-node pause', ms(cfg.circuitTtlMs), 'then one probe request checks if it is back')
+            kpi('How traffic is shared', cfg.strategy === 'weighted' ? 'Spread out' : 'Main first', cfg.strategy === 'weighted' ? 'requests are spread across online servers' : 'the first online server answers; the others are backups'),
+            kpi('Waits for a server', ms(cfg.timeoutMs), 'then tries the next one (up to ' + cfg.maxAttempts + ' servers, ' + ms(cfg.totalBudgetMs) + ' in total)'),
+            kpi('Skips an offline server for', ms(cfg.circuitTtlMs), 'then one request checks if it is back')
           ),
           s.pools.map((p) => poolCard(p)),
         ]);
@@ -484,8 +404,8 @@
     },
 
     'free-tiers': {
-      title: 'Free tiers',
-      sub: 'How much of each free quota is used',
+      title: 'Free limits',
+      sub: 'How much of each cloud’s free plan you have used',
       group: 'Monitor',
       icon: 'gauge',
       badge: (s) => {
@@ -669,8 +589,8 @@
     },
 
     providers: {
-      title: 'Providers',
-      sub: 'Free tiers you can add to the mesh',
+      title: 'Clouds',
+      sub: 'Free clouds you can host your backend on',
       group: 'Build',
       icon: 'providers',
       keepsInput: true,
@@ -750,8 +670,8 @@
     },
 
     setup: {
-      title: 'Setup',
-      sub: "What's done, what's missing, and your config file",
+      title: 'Add or change servers',
+      sub: 'What is set up, what is missing, and how to change it',
       group: 'Build',
       icon: 'setup',
       badge: (s) => {
@@ -768,9 +688,17 @@
         const checks = setupChecks(s);
         const done = checks.filter((c) => c.state === 'ok').length;
         append(view, [
-          card('Getting started', h('div', { class: 'checklist' }, checks.map(checkRow)), h('span', { class: 'pill ' + (done === checks.length ? 'ok' : 'accent'), text: done + ' of ' + checks.length + ' done' })),
-          h('div', { class: 'section-title' }, h('h2', { text: 'Config builder' }), h('span', { class: 'count', text: 'creates omnimesh.config.yaml; nothing is saved on the router' })),
-          builderView(),
+          card('Your setup', h('div', { class: 'checklist' }, checks.map(checkRow)), h('span', { class: 'pill ' + (done === checks.length ? 'ok' : 'accent'), text: done + ' of ' + checks.length + ' done' })),
+          card(
+            'Add a cloud, change settings or ship new code',
+            h(
+              'div',
+              { class: 'card-body stack' },
+              h('p', { style: { margin: 0 } }, 'In your project folder, run ', h('code', { text: 'omnimesh up' }), '. It shows your current servers and lets you add a cloud, change your app’s settings, or redeploy the latest code to every cloud.'),
+              h('p', { class: 'muted small', style: { margin: 0 }, text: 'This dashboard runs on Cloudflare and never holds your cloud keys, so those changes happen on your computer.' })
+            )
+          ),
+          h('details', { class: 'advanced' }, h('summary', { text: 'Advanced: edit the config by hand' }), h('p', { class: 'muted small', text: 'Builds an omnimesh.config.yaml for servers you deployed yourself. Nothing is saved on the router.' }), builderView()),
         ]);
       },
     },
@@ -844,11 +772,91 @@
 
   // ---------------------------------------------------------------- page parts
 
+  /** Shown until the first request: explains the screen and offers a real test request. */
+  function firstRunCard(s) {
+    // The overview redraws every few seconds, so the result lives in state, not in the element
+    const result = h('div', { class: 'muted small', attrs: { 'aria-live': 'polite' }, text: state.testResult || '' });
+    const show = (text) => {
+      state.testResult = text;
+      result.textContent = text;
+    };
+    const path = s.pools[0] ? s.pools[0].healthPath || (s.pools[0].prefix === '/' ? '/' : s.pools[0].prefix) : '/';
+    const send = h('button', {
+      class: 'btn btn-primary',
+      type: 'button',
+      onclick: async () => {
+        send.disabled = true;
+        show('Sending a real request to ' + location.origin + path + ' …');
+        const t0 = performance.now();
+        try {
+          const res = await fetch(path, { cache: 'no-store', credentials: 'omit' });
+          const took = Math.round(performance.now() - t0);
+          const node = res.headers.get('X-Omni-Node');
+          show(res.status < 500
+            ? '✓ Your app answered (status ' + res.status + ') from ' + (node || 'a server') + ' in ' + took + ' ms.'
+            : '✗ Your app answered with an error (status ' + res.status + '). Open that cloud’s dashboard and check the app’s logs.');
+        } catch (e) {
+          show('✗ The request did not get through: ' + e.message);
+        }
+        send.disabled = false;
+        poll();
+      },
+    }, 'Send a test request');
+    return card(
+      'What you’re looking at',
+      h(
+        'div',
+        { class: 'card-body stack' },
+        h('p', { style: { margin: 0 } }, 'Your API is live at ', h('strong', { text: location.origin }), '. Every request to it goes to one of your servers below. If a server stops answering, the next one takes over automatically.'),
+        h(
+          'div',
+          { class: 'toolbar', style: { margin: 0 } },
+          send,
+          h('button', { class: 'btn', type: 'button', onclick: openGlossary }, 'What do these words mean?'),
+          h('button', { class: 'btn', type: 'button', onclick: () => { setItem('local', INTRO_KEY, '1'); renderPage(); } }, 'Got it')
+        ),
+        result
+      )
+    );
+  }
+
+  const GLOSSARY = [
+    ['Server', 'One copy of your backend, running on one cloud (for example Koyeb or Render).'],
+    ['Route', 'A part of your API, like /api or /auth. Each route has its own list of servers.'],
+    ['Backup, ready', 'Online and waiting. It answers when the servers before it can’t.'],
+    ['Offline', 'Did not answer. The router skips it for a short time, then checks it again.'],
+    ['Free limit reached', 'This cloud’s free plan is nearly used up, so traffic moves to the next cloud.'],
+    ['Times a backup answered', 'How often a server failed and another one answered instead. Your users still got a reply.'],
+    ['Response time', 'How long requests take. 95% of requests were faster than the number shown.'],
+    ['Router', 'The small program on Cloudflare that owns your one URL and picks a server for every request.'],
+    ['Sign-in key', 'The password for this dashboard (OMNIMESH_STATUS_TOKEN in your .env).'],
+    ['Locked / Not locked', 'Locked servers only accept requests that come through your router, so nobody can skip it.'],
+  ];
+
+  function openGlossary() {
+    const root = $('drawer-root');
+    const close = () => {
+      clear(root);
+      document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => e.key === 'Escape' && close();
+    document.addEventListener('keydown', onKey);
+    const closeBtn = h('button', { class: 'icon-btn', type: 'button', onclick: close, attrs: { 'aria-label': 'Close' } }, icon('x', 18));
+    append(clear(root), [
+      h('div', { class: 'drawer-scrim', onclick: close }),
+      h('aside', { class: 'drawer', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'What the words mean' } },
+        h('div', { class: 'drawer-head' }, h('h2', { text: 'What the words mean' }), closeBtn),
+        h('div', { class: 'drawer-body' }, h('dl', { class: 'glossary' }, GLOSSARY.map(([term, text]) => [h('dt', { text: term }), h('dd', { text })])))
+      ),
+    ]);
+    closeBtn.focus();
+  }
+
   function meshMap(s) {
     return h(
       'div',
       { class: 'card card-body mesh' },
-      h('div', { class: 'mesh-entry' }, 'Clients', icon('arrow', 14), h('span', { class: 'mesh-node-router' }, icon('globe', 14), s.domain), icon('arrow', 14), 'pools'),
+      h('div', { class: 'mesh-entry' }, 'Your users', icon('arrow', 14), h('span', { class: 'mesh-node-router' }, icon('globe', 14), s.domain), icon('arrow', 14), 'your servers'),
       s.pools.map((p) =>
         h(
           'div',
@@ -867,7 +875,7 @@
 
   function freeTierSummary(s) {
     const list = uniqueByLabel(allNodes(s).filter((n) => n.quota)).sort((a, b) => b.quota.percentUsed - a.quota.percentUsed).slice(0, 4);
-    if (!list.length) return h('div', { class: 'empty' }, h('strong', { text: 'No request quotas tracked' }), 'Nodes created by omnimesh init carry their provider’s free quota.');
+    if (!list.length) return h('div', { class: 'empty' }, h('strong', { text: 'No request quotas tracked' }), 'Servers deployed by omnimesh up carry their cloud’s free limit.');
     return h('div', { class: 'card-body stack' }, list.map((n) => h('div', null, h('div', { class: 'node-name', style: { marginBottom: '4px' }, text: n.label }), quotaBar(n.quota))));
   }
 
@@ -1066,18 +1074,18 @@
     const down = nodes.filter((n) => n.state === 'down');
     const untested = nodes.filter((n) => n.state === 'unknown');
     return [
-      { state: 'ok', title: 'Router is online', detail: 'Serving ' + s.domain + ', instance up ' + duration(s.instance.uptimeSeconds) + '.' },
-      { state: 'ok', title: 'Dashboard token works', detail: 'OMNIMESH_STATUS_TOKEN is set on the router.' },
+      { state: 'ok', title: 'Your API is online', detail: 'Answering at ' + s.domain + '.' },
+      { state: 'ok', title: 'You are signed in', detail: 'Your sign-in key works.' },
       {
         state: s.pools.every((p) => p.nodes.length > 0) ? 'ok' : 'bad',
-        title: 'Every pool has nodes',
+        title: 'Your API has servers',
         detail: plural(s.pools.length, 'pool') + ', ' + plural(uniqueByLabel(nodes).length, 'distinct node') + '. Placeholder URLs are refused at startup, so these are real.',
       },
       down.length
-        ? { state: 'bad', title: 'All nodes answer', detail: down.map((n) => n.label + ' (' + (n.failureReason || 'down') + ')').join(', ') + ' failing. Check the service, its GATEWAY_SECRET, and its /health route.' }
+        ? { state: 'bad', title: 'All servers answer', detail: down.map((n) => n.label + ' (' + (n.failureReason || 'offline') + ')').join(', ') + ' not answering. Open that cloud’s dashboard and check the app’s logs.' }
         : untested.length
-          ? { state: 'idle', title: 'All nodes answer', detail: plural(untested.length, 'node') + ' had no traffic yet: ' + uniqueByLabel(untested).map((n) => n.label).join(', ') + '. They are tried when earlier nodes fail.' }
-          : { state: 'ok', title: 'All nodes answer', detail: 'Every node has served traffic successfully.' },
+          ? { state: 'idle', title: 'All servers answer', detail: plural(untested.length, 'server') + ' not checked yet: ' + uniqueByLabel(untested).map((n) => n.label).join(', ') + '. The router checks every server every few minutes.' }
+          : { state: 'ok', title: 'All servers answer', detail: 'Every server answered its last check.' },
     ].concat(sharedChecks(s));
   }
 
@@ -1085,10 +1093,10 @@
     return [
       s.sharing.health === 'shared'
         ? { state: 'ok', title: 'Shared node health (Cloudflare KV)', detail: 'Every router instance skips a dead node as soon as one of them sees it fail.' }
-        : { state: 'warn', title: 'Shared node health (Cloudflare KV)', detail: 'Not connected: each router instance learns about dead nodes on its own. Bind OMNIMESH_KV in wrangler.toml.' },
+        : { state: 'warn', title: 'Shared node health (Cloudflare KV)', detail: 'Not connected, so each copy of the router learns about offline servers on its own. Run omnimesh up again to set it up.' },
       s.sharing.rateLimit === 'shared'
         ? { state: 'ok', title: 'Shared rate limiter', detail: 'Per-IP and per-caller limits are counted across router instances.' }
-        : { state: s.routerConfig.rateLimit.enabled ? 'warn' : 'idle', title: 'Shared rate limiter', detail: s.routerConfig.rateLimit.enabled ? 'Counting per instance only, so a distributed bot gets more. Add the RATE_LIMITER binding from wrangler.toml.example.' : 'Rate limiting is off in the config.' },
+        : { state: s.routerConfig.rateLimit.enabled ? 'warn' : 'idle', title: 'Shared rate limiter', detail: s.routerConfig.rateLimit.enabled ? 'Counted per copy of the router only, so a bot spread over many IPs gets more. Run omnimesh up again to set it up.' : 'Rate limiting is off in the config.' },
     ];
   }
 
@@ -1408,13 +1416,17 @@
           );
         }
         // Pages with inputs are only redrawn when first shown, so typing is never interrupted
-        if (first || !PAGES[state.route].keepsInput) renderPage();
+        // Redraw only when something changed, so buttons stay clickable and nothing flickers
+        const signature = JSON.stringify(Object.assign({}, data, { timestamp: 0, instance: 0 }));
+        const changed = signature !== state.lastSignature;
+        state.lastSignature = signature;
+        if (first || (changed && !PAGES[state.route].keepsInput)) renderPage();
         else updateChrome();
         schedule(document.hidden ? POLL_MS * 5 : POLL_MS);
       })
       .catch((err) => {
         if (err.unauthorized) {
-          signOut('That token was not accepted. Check OMNIMESH_STATUS_TOKEN on the router.');
+          signOut('That sign-in key was not accepted. Copy it again from OMNIMESH_STATUS_TOKEN in your .env, or run omnimesh open.');
           return;
         }
         state.failures += 1;
@@ -1477,6 +1489,8 @@
     applyTheme();
     $('menu').appendChild(icon('menu', 18));
     $('signout').appendChild(icon('logout', 17));
+    $('help').appendChild(icon('help', 17));
+    $('help').addEventListener('click', openGlossary);
     $('menu').addEventListener('click', openSidebar);
     $('scrim').addEventListener('click', closeSidebar);
     $('theme').addEventListener('click', () => {
@@ -1490,21 +1504,6 @@
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden && state.token) poll();
     });
-    // The demo login only exists for the local dev cluster; real deployments never show it
-    const devBtn = $('dev-token-btn');
-    const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-    if (devBtn && !isLocal) devBtn.remove();
-    if (devBtn && isLocal) {
-      devBtn.addEventListener('click', () => {
-        $('token').value = 'dev-token';
-        state.token = 'dev-token';
-        setItem('session', TOKEN_KEY, 'dev-token');
-        $('login-error').textContent = '';
-        setLive('', 'Connecting…');
-        poll();
-      });
-    }
-
     $('login-form').addEventListener('submit', (e) => {
       e.preventDefault();
       const value = $('token').value.trim();
@@ -1516,9 +1515,17 @@
       poll();
     });
 
+    // `omnimesh open` and `omnimesh up` link here with #token=<key>: the fragment never reaches the
+    // server; keep it for this tab and remove it from the address bar and history straight away
+    const linkToken = new URLSearchParams(location.hash.replace(/^#\/?/, '')).get('token');
+    if (linkToken) {
+      setItem('session', TOKEN_KEY, linkToken);
+      history.replaceState(null, '', location.pathname + '#/overview');
+    }
+
     const key = (location.hash.replace(/^#\/?/, '') || 'overview').split('?')[0];
     state.route = PAGES[key] ? key : 'overview';
-    state.token = getItem('session', TOKEN_KEY);
+    state.token = linkToken || getItem('session', TOKEN_KEY);
     if (state.token) {
       showShell();
       renderPage();

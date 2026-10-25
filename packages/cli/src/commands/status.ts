@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import pc from 'picocolors';
-import { parseOmniMeshConfigYaml, isPlaceholderUrl } from '@omnimesh/core';
+import { parseOmniMeshConfigYaml, isPlaceholderUrl, nodeHealthPath } from '@omnimesh/core';
 import { readEnvFile } from '../env.js';
 import { getProvider } from '@omnimesh/providers';
 
@@ -44,7 +44,7 @@ export async function runStatus(options: StatusOptions = {}) {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 2000);
-        const res = await fetch(`${url.replace(/\/$/, '')}/health`, {
+        const res = await fetch(`${url.replace(/\/$/, '')}${nodeHealthPath(rawNode)}`, {
           signal: controller.signal,
           headers: {
             'X-Gateway-Secret': gatewaySecret,
@@ -52,7 +52,8 @@ export async function runStatus(options: StatusOptions = {}) {
         });
         clearTimeout(timeout);
         latency = Date.now() - t0;
-        statusStr = res.ok ? pc.green('HEALTHY (200 OK)') : pc.red(`DEGRADED (${res.status})`);
+        // Any answer below 500 proves the server is running (a 404 included)
+        statusStr = res.status < 500 ? pc.green(`ONLINE (${res.status})`) : pc.red(`ERROR (${res.status})`);
       } catch (err: any) {
         latency = Date.now() - t0;
         statusStr = pc.red(`OFFLINE (${err.message})`);

@@ -6,20 +6,21 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <title>OmniMesh</title>
+<!-- Inline icon: otherwise the browser asks the router for /favicon.ico, which would reach your app -->
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="/_omnimesh/dashboard/app.css">
 </head>
 <body>
 <div id="login" class="login-screen" hidden>
   <form id="login-form" class="login-card" autocomplete="off">
     <div class="brand-mark" aria-hidden="true"></div>
-    <h1>Sign in to OmniMesh</h1>
-    <p class="muted">Enter your router's status token to manage the mesh.</p>
-    <label for="token">Status token</label>
-    <input id="token" type="password" required spellcheck="false" autocomplete="off">
+    <h1>Sign in to your OmniMesh dashboard</h1>
+    <p class="muted">This page is for the owner of this API. Your sign-in key was shown when you deployed, and it is saved in your project's <code>.env</code> file as <code>OMNIMESH_STATUS_TOKEN</code>.</p>
+    <label for="token">Sign-in key</label>
+    <input id="token" type="password" required spellcheck="false" autocomplete="off" placeholder="Paste your sign-in key">
     <div id="login-error" class="form-error" role="alert"></div>
-    <button class="btn btn-primary btn-block" type="submit">Connect</button>
-    <button id="dev-token-btn" class="btn btn-block" type="button">Local demo: sign in with dev-token</button>
-    <p class="hint">Your dashboard token is shown when <code>omnimesh up</code> finishes, and saved as <code>OMNIMESH_STATUS_TOKEN</code> in your <code>.env</code>.</p>
+    <button class="btn btn-primary btn-block" type="submit">Sign in</button>
+    <p class="hint">Lost it? In your project folder run <code>omnimesh open</code>. It opens this dashboard already signed in.</p>
   </form>
 </div>
 
@@ -50,6 +51,7 @@
       <div class="topbar-actions">
         <span id="live" class="live-chip" aria-live="polite"><span class="dot"></span><span class="live-text">Connecting…</span></span>
         <button id="alerts" class="alert-chip" type="button" hidden></button>
+        <button id="help" class="icon-btn" type="button" aria-label="What the words mean" title="What the words mean"></button>
         <button id="theme" class="icon-btn" type="button" aria-label="Toggle light or dark theme"></button>
         <button id="signout" class="icon-btn" type="button" aria-label="Sign out" title="Sign out"></button>
       </div>

@@ -12,7 +12,7 @@ You can run a full OmniMesh without any credit or debit card. `init --no-card` l
 | Put your domain on Cloudflare | Routes every request, fails over in one timeout, switches before free quotas run out |
 | | Live dashboard at `/_omnimesh/dashboard` |
 
-OmniMesh never creates accounts or uploads your code: providers require you to do that yourself, and the project allows only one real account per provider.
+OmniMesh never creates accounts for you: providers require you to own them, and the project allows only one real account per provider. Everything after that, including building and deploying your code on each cloud, `omnimesh up` does for you.
 
 ## The no-card stack
 

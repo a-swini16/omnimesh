@@ -8,6 +8,7 @@ import { runDeploy } from './commands/deploy.js';
 import { runAddProvider, runRemoveProvider } from './commands/add-provider.js';
 import { runDbPromote } from './commands/db-promote.js';
 import { runUpCommand } from './commands/up.js';
+import { runOpen, runToken } from './commands/open.js';
 
 export * from './commands/init.js';
 export * from './commands/doctor.js';
@@ -65,8 +66,8 @@ export function createProgram() {
 
   program
     .command('deploy')
-    .description('Deploy backend code to all configured providers in parallel and router last')
-    .option('--dry-run', 'Simulate deployment without triggering real API calls')
+    .description('Redeploy the latest code to every cloud (or check your servers in a manual setup)')
+    .option('--dry-run', 'Show what would happen without contacting any cloud')
     .action(async (opts) => {
       if ((await runDeploy({ dryRun: opts.dryRun })) === false) process.exitCode = 1;
     });
@@ -94,6 +95,27 @@ export function createProgram() {
     .option('-f, --force', 'Force promotion without interactive confirmation')
     .action(async (opts) => {
       if ((await runDbPromote({ force: opts.force })) === false) process.exitCode = 1;
+    });
+
+  program
+    .command('open')
+    .description('Open your dashboard, already signed in')
+    .option('--no-open', 'Print the dashboard address instead of opening the browser')
+    .action(async (opts) => {
+      if ((await runOpen({ open: opts.open })) === false) process.exitCode = 1;
+    });
+
+  program
+    .command('token')
+    .description('Show your dashboard sign-in key, or replace it with --rotate')
+    .option('--rotate', 'Create a new key and update it on your live router')
+    .action(async (opts) => {
+      try {
+        if ((await runToken({ rotate: opts.rotate })) === false) process.exitCode = 1;
+      } catch (e) {
+        console.error((e as Error).message);
+        process.exitCode = 1;
+      }
     });
 
   program
