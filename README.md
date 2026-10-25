@@ -1,4 +1,3 @@
-<!-- Before publishing: replace OWNER with your GitHub username in this file, package.json, SECURITY.md, CONTRIBUTING.md and .github/. -->
 <div align="center">
 
 <img src="docs/images/logo.svg" width="76" alt="OmniMesh logo">
@@ -9,7 +8,7 @@
 
 **One domain. Many free clouds. Automatic failover. $0 until you outgrow it.**
 
-[![CI](https://github.com/OWNER/omnimesh/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/omnimesh/actions/workflows/ci.yml)
+[![CI](https://github.com/a-swini16/omnimesh/actions/workflows/ci.yml/badge.svg)](https://github.com/a-swini16/omnimesh/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![No credit card](https://img.shields.io/badge/credit%20card-not%20required-34c77b.svg)](docs/zero-card-guide.md)
 [![TypeScript strict](https://img.shields.io/badge/TypeScript-strict-3178c6.svg)](tsconfig.base.json)
@@ -85,7 +84,7 @@ flowchart LR
 > The `omnimesh` package is not on npm yet. Run the CLI from a clone:
 >
 > ```bash
-> git clone https://github.com/OWNER/omnimesh.git && cd omnimesh && pnpm install
+> git clone https://github.com/a-swini16/omnimesh.git && cd omnimesh && pnpm install
 > alias omnimesh="node $PWD/packages/cli/bin/omnimesh.js"
 > ```
 

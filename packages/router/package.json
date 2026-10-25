@@ -26,12 +26,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OWNER/omnimesh.git",
+    "url": "git+https://github.com/a-swini16/omnimesh.git",
     "directory": "packages/router"
   },
-  "homepage": "https://github.com/OWNER/omnimesh#readme",
+  "homepage": "https://github.com/a-swini16/omnimesh#readme",
   "bugs": {
-    "url": "https://github.com/OWNER/omnimesh/issues"
+    "url": "https://github.com/a-swini16/omnimesh/issues"
   },
   "license": "MIT"
 }

@@ -42,7 +42,7 @@ If the old secret leaked, keep step 4's window as short as possible.
 
 Please **do not open a public issue**. Report it privately through GitHub's private vulnerability reporting:
 
-**[Report a vulnerability](https://github.com/OWNER/omnimesh/security/advisories/new)** (Security tab → *Report a vulnerability*)
+**[Report a vulnerability](https://github.com/a-swini16/omnimesh/security/advisories/new)** (Security tab → *Report a vulnerability*)
 
 Include the affected package and version, steps to reproduce, and the impact you expect. We aim to acknowledge reports within 48 hours and agree on a fix and disclosure timeline with you. Please give us a reasonable window to release a fix before you disclose publicly.
 
