@@ -1,51 +1,61 @@
-# Zero Credit Card Deployment Guide
+# No-card setup guide
 
-A developer with **zero credit or debit card** can run a complete, highly available OmniMesh federation.
+You can run a full OmniMesh without any credit or debit card. `init --no-card` leaves out Oracle Cloud and Cloudflare R2 (the only two that need a card) and uses providers that sign you up with GitHub or Google.
 
-When you select "No Card" during setup, OmniMesh skips Oracle Cloud and Cloudflare R2 automatically, assigning their responsibilities to generous services that require no card for registration.
+## Who does what
 
----
+| You do this once | OmniMesh does this for you |
+| :--- | :--- |
+| Create one free account per provider (no card) | Writes `omnimesh.config.yaml` with every pool ready |
+| Deploy your app on each provider by connecting your GitHub repo in its dashboard | Generates every secret in `.env` (`GATEWAY_SECRET`, `JWT_SECRET`, `OMNIMESH_STATUS_TOKEN`) |
+| Paste each app's address into the config, replacing the `replace-me.invalid` placeholders | `omnimesh doctor` lists anything still missing |
+| Put your domain on Cloudflare | Routes every request, fails over in one timeout, switches before free quotas run out |
+| | Live dashboard at `/_omnimesh/dashboard` |
 
-## 📋 The No-Card Architecture Stack
+OmniMesh never creates accounts or uploads your code: providers require you to do that yourself, and the project allows only one real account per provider.
 
-| Subsystem | No-Card Provider | Verified Free-Tier Quota | Role |
-| :--- | :--- | :--- | :--- |
-| **Front Door & Router** | **Cloudflare Workers** | 100,000 req/day, Unlimited CDN Egress | Edge Router, SSL, Global DNS |
-| **Primary Compute** | **Koyeb** | 1 Eco Web Service (512 MB RAM, 0.1 vCPU) | Hot Standby Compute Node |
-| **Warm Backup** | **Render** | 750 free instance hours/month | Warm Backup (Kept awake via GitHub Actions) |
-| **Burst & Auth** | **Vercel & Deno Deploy** | 1M edge function invocations/mo | Serverless Burst & Stateless JWT Auth |
-| **Async & Webhooks** | **Netlify Functions** | 125,000 function requests/mo | Asynchronous Background Tasks |
-| **Database** | **Neon Postgres** | 0.5 GiB Postgres, Connection Pooling | Central Authoritative Single-Writer DB |
-| **Cache & Locks** | **Upstash Redis** | 10,000 commands/day | Distributed Idempotency & Rate Limiting |
-| **Object Storage** | **Supabase Storage** | 1 GB Free File Storage | User uploads, avatars, static assets |
+## The no-card stack
 
----
+| Job | Provider | Free tier (check `lastVerified` in each `limits.json`) |
+| :--- | :--- | :--- |
+| Router and domain | Cloudflare Workers | 100,000 requests/day (this is the mesh's free ceiling) |
+| Main compute | Koyeb | 1 small always-on service |
+| Backup compute | Render | 750 hours/month; sleeps after 15 min idle |
+| Burst and auth | Vercel, Deno Deploy | Serverless functions (Vercel Hobby is non-commercial only) |
+| Webhooks | Netlify | 125,000 function requests/month |
+| Database | Neon or Supabase | One shared Postgres (the single writer) |
+| Idempotency keys | Upstash Redis | 10,000 commands/day |
+| File storage | Supabase Storage | 1 GB |
 
-## 🛠️ Step-by-Step Setup (Under 10 Minutes)
+## Steps
 
-### 1. Initialize in No-Card Mode
+The `omnimesh` package is not on npm yet, so run the CLI from a clone:
+
 ```bash
-npx omnimesh init --no-card
+git clone https://github.com/omnimesh/omnimesh.git && cd omnimesh && pnpm install
+alias omnimesh="node $PWD/packages/cli/bin/omnimesh.js"
 ```
 
-### 2. Sign Up & Populate Tokens in `.env`
-Sign up using your GitHub or Google account (no card required on any of these platforms):
-- **Cloudflare:** Create an API token with Workers permissions.
-- **Koyeb:** Copy your API token from Account Profile.
-- **Render:** Generate an API Key under Account Settings.
-- **Neon:** Create a free project and copy your connection string (`DATABASE_URL`).
-- **Upstash:** Create a free Redis database and copy REST URL & Token.
-- **Supabase:** Copy Project URL and Anon Key.
+1. **Create the config** in your app's folder:
+   ```bash
+   omnimesh init --no-card --domain api.yourapp.com
+   ```
+2. **Deploy your app** on Koyeb, Render, Vercel, Netlify and Deno Deploy (each dashboard has "deploy from GitHub"). Use the `@omnimesh/node` middleware so every node checks `GATEWAY_SECRET` and serves `/health`.
+3. **Set secrets.** Put `GATEWAY_SECRET` (and `JWT_SECRET` if you use the auth helpers) on every node. Put `GATEWAY_SECRET` and `OMNIMESH_STATUS_TOKEN` on the router. For idempotent writes, add `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to every node.
+4. **Paste your app URLs** into `omnimesh.config.yaml`, or build the file in the dashboard's Setup page and copy it.
+5. **Check everything:**
+   ```bash
+   omnimesh doctor
+   ```
+6. **Deploy the router** from `packages/router` (copy `wrangler.toml.example` to `wrangler.toml` first):
+   ```bash
+   npx wrangler deploy
+   ```
+7. **Verify** that every pool has a healthy node, then open `https://api.yourapp.com/_omnimesh/dashboard`:
+   ```bash
+   omnimesh deploy
+   ```
 
-### 3. Verify Health & Security
-```bash
-npx omnimesh doctor
-```
+## Sleeping servers
 
-### 4. Deploy Across All Providers
-```bash
-npx omnimesh deploy
-```
-
-### 5. Prevent Cold Starts on Render
-OmniMesh automatically generated `.github/workflows/keep-alive.yml`. Simply push your repository to GitHub, and GitHub Actions will ping your service every 14 minutes to keep Render awake 24/7!
+Render's free services sleep after 15 minutes idle and take 30–50 s to wake. Keep Render as a backup, not your main node. Keep-alive pings are off by default because some providers' terms forbid them; if yours allow it, re-run `omnimesh init --force --keep-alive`.

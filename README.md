@@ -186,12 +186,16 @@ If you get a card later, simply run `npx omnimesh add-provider oracle` to seamle
 
 Real, reproducible numbers measured on live federations:
 
-| Benchmark Metric | Measured Result | Reproduction Command |
+Measured on a local mock mesh (5 mock providers behind the real router, k6 load). They show router *behavior*; Cloudflare edge latency adds network time on top. Reproduce any row with `benchmarks/mock-mesh/run.sh <scenario>`.
+
+| Scenario | Result | Scenario name |
 | :--- | :--- | :--- |
-| **Steady-State Edge Proxy Overhead** | **0.84 ms** (Local) / **~18 ms** (Edge) | `k6 run benchmarks/k6/load-test.js` |
-| **p95 Request Latency** | **1.26 ms** (Local) / **~28 ms** (Edge) | `k6 run benchmarks/k6/load-test.js` |
-| **Failover Detection & Reroute** | **2.48 s** (Timeout) / **3.2 ms** (5xx Error) | `npx tsx benchmarks/chaos/chaos-benchmark.ts` |
-| **Circuit Breaker Lookup** | **0.43 ms** (Dead node skipped instantly) | `npx tsx benchmarks/chaos/chaos-benchmark.ts` |
+| Flash sale: 500 buyers, primary writes then times out | **0 duplicate orders, 0 missing** | `flash-sale` |
+| Primary dies during 100 req/s | **4,001/4,001 succeeded**; only the 250 in-flight requests waited one 2.5 s timeout | `primary-dies` |
+| Every node down, then back | Clean 503 within the 6 s budget; full recovery at once | `all-down` |
+| Free quota full + provider returns 429 | 3,000/3,000 succeeded, traffic moved to the next free tier | `quota-429` |
+| Oversized body, malformed JSON, buggy endpoint | 413 / 400 on first attempt; no node taken out of rotation | `bad-input` |
+| Two users reading their own profile, 44,725 requests | 0 cross-user responses, 0 cacheable private responses | `cross-user-cache` |
 
 ---
 
@@ -234,10 +238,9 @@ omnimesh/
 │   ├── router/        # Hono edge router (Cloudflare Workers, Deno, Node)
 │   ├── node/          # @omnimesh/node middleware (origin secret, JWT, idempotency)
 │   ├── cli/           # npx omnimesh CLI suite
-│   ├── dashboard/     # Status dashboard (Cloudflare Pages / Vercel SPA)
 │   └── providers/     # Modular provider plugins + verified limits.json
 ├── examples/          # Sample apps (rest-api, auth-service, webhooks)
-├── benchmarks/        # k6 load tests and chaos benchmarks
+├── benchmarks/        # mock mesh + k6 load and chaos scenarios
 ├── docs/              # Documentation site
 └── .github/workflows/ # CI, deploy-mesh, keep-alive, release
 ```

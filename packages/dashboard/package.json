@@ -1,6 +1,0 @@
-{
-  "name": "@omnimesh/dashboard",
-  "version": "1.0.0",
-  "description": "Docs for the live OmniMesh dashboard, which the router serves at /_omnimesh/dashboard",
-  "scripts": {}
-}

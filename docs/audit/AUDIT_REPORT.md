@@ -1,6 +1,6 @@
 # OmniMesh Audit Report
 
-Scope: lean (decision D4 in [AUDIT_PLAN.md](AUDIT_PLAN.md)). Source of truth: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Scope: lean (decision D4 in [AUDIT_PLAN.md](AUDIT_PLAN.md)). Source of truth: [docs/ARCHITECTURE.md](../ARCHITECTURE.md).
 Status: **in progress.** Every known Critical, High and Medium issue is fixed with a test, and all 6 lean load scenarios pass. 4 Low issues and the independent re-audit are next.
 
 | Severity | Found | Fixed | Open |
@@ -142,7 +142,7 @@ Limit: on Cloudflare, counters belong to the router instance that served the pag
 
 ## Low (open)
 
-L-1 k6 script `benchmarks/k6/load-test.js` has a hardcoded fallback gateway secret · L-2 no root `.env.example` (and `GATEWAY_SECRET_PREVIOUS`/`OMNIMESH_STATUS_TOKEN` are only documented in the generated `.env` and `SECURITY.md`) · L-3 `any` casts in router/node request paths; `pnpm lint` is a no-op · L-4 README benchmark numbers and the "<2.5 s" badge predate the mock-mesh results.
+L-2 no root `.env.example` (and `GATEWAY_SECRET_PREVIOUS`/`OMNIMESH_STATUS_TOKEN` are only documented in the generated `.env` and `SECURITY.md`) · L-3 `any` casts in router/node request paths; `pnpm lint` is a no-op · *(L-1 and L-4 closed by removing the outdated k6/chaos scripts and their unverified numbers; the README now cites the mock-mesh results.)*
 
 ## Fixed earlier on this branch (`4b741e8`, `15fd726`)
 

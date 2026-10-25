@@ -1,7 +1,7 @@
 # OmniMesh Audit Plan
 
 Status: **waiting for owner approval** before any fixing starts (brief §2.1).
-Source of truth: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), extracted from `OmniMesh — System Architecture v2.pdf`.
+Source of truth: [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md), extracted from `docs/architecture-v2.pdf`.
 Branch: `harden-router-security-and-load-balancing` (two earlier hardening commits, `4b741e8` and `15fd726`, already on it).
 
 ---
