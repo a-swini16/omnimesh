@@ -4,9 +4,9 @@
 
 # OmniMesh
 
-### The free AWS alternative for side projects, MVPs and student apps.
+### The open-source AWS alternative: scale across multiple clouds with sub-3s auto-failover.
 
-**One domain. Many free clouds. Automatic failover. $0 until you outgrow it.**
+**One domain. Many clouds. Sub-3s auto-failover. Zero vendor lock-in.**
 
 [![CI](https://github.com/a-swini16/omnimesh/actions/workflows/ci.yml/badge.svg)](https://github.com/a-swini16/omnimesh/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -25,9 +25,9 @@
 
 ## Why OmniMesh
 
-AWS is powerful, but a surprise bill can sink a student project or a pre-revenue MVP. Free tiers cost nothing, but each one has a catch: it sleeps, it caps requests, or it goes down, and when it does, so does your app.
+AWS is powerful, but complex, expensive, and locks you into a single vendor. Running resilient infrastructure shouldn't require thousands of dollars in cloud bills or a team of DevOps engineers.
 
-**OmniMesh puts one router in front of many free tiers.** It does for servers what [OmniRoute](https://github.com/cheaper-inference/OmniRoute) does for AI providers: one entry point, many interchangeable backends, automatic failover.
+**OmniMesh puts one unified router in front of multiple cloud tiers.** It does for backend infrastructure what [OmniRoute](https://github.com/cheaper-inference/OmniRoute) does for AI models: one entry point, resilient multi-cloud federation, and instantaneous automatic failover.
 
 |  | AWS | One free tier | **OmniMesh** |
 | :--- | :--- | :--- | :--- |

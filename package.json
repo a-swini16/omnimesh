@@ -2,7 +2,7 @@
   "name": "omnimesh-monorepo",
   "version": "1.1.0",
   "private": true,
-  "description": "The free AWS alternative for side projects and MVPs: one domain in front of many free cloud tiers, with automatic failover.",
+  "description": "The open-source AWS alternative: scale your backend across multiple clouds with sub-3s auto-failover and zero vendor lock-in.",
   "author": "OmniMesh Contributors",
   "license": "MIT",
   "packageManager": "pnpm@12.15.0",

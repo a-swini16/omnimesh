@@ -28,7 +28,7 @@
    4. Runs omnimesh chaos to kill a server and watch traffic move to another one live.
 
   Positioning (what the README says): "Your free tiers, merged into one cloud." It is a
-  resilient zero-cost backend for side projects, MVPs and early startups. It is not marketed
+  resilient multi-cloud backend for modern apps, startups and production systems. It is not marketed
   as unlimited, and not as a replacement for AWS at Flipkart scale.
 
   2. Will it work?
