@@ -5,7 +5,8 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { timingSafeEqual } from '@omnimesh/core';
 import { realDeps, type Deps } from './http.js';
-import { runUp, loadState, readDotEnv, writeDotEnv, type UpOptions, type UpResult } from './orchestrate.js';
+import { runUp, loadState, readDotEnv, writeDotEnv, type UpInput, type UpOptions, type UpResult } from './orchestrate.js';
+import { parseOciCredentials, type OciCredentials } from './oci.js';
 
 const WIZARD_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'wizard');
 const ASSETS: Record<string, [string, string]> = {
@@ -20,7 +21,32 @@ const SECURITY_HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'Cache-Control': 'no-store',
 };
-const TOKEN_ENV = { koyeb: 'KOYEB_API_TOKEN', render: 'RENDER_API_KEY', cloudflare: 'CLOUDFLARE_API_TOKEN' } as const;
+const TOKEN_ENV = { koyeb: 'KOYEB_API_TOKEN', render: 'RENDER_API_KEY', cloudflare: 'CLOUDFLARE_API_TOKEN', github: 'OMNIMESH_GITHUB_TOKEN' } as const;
+/** The Oracle private key lives next to the deployment state (git-ignored, readable only by you) */
+const OCI_KEY_FILE = path.join('.omnimesh', 'oci_api_key.pem');
+
+/** Oracle credentials saved by an earlier run, or null. */
+function savedOracle(cwd: string): { creds: OciCredentials; hostname: string } | null {
+  const env = readDotEnv(cwd);
+  try {
+    const pem = fs.readFileSync(path.join(cwd, OCI_KEY_FILE), 'utf-8');
+    const config = ociConfigText({ tenancy: env.OCI_TENANCY, user: env.OCI_USER, fingerprint: env.OCI_FINGERPRINT, region: env.OCI_REGION });
+    return env.ORACLE_HOSTNAME ? { creds: parseOciCredentials(config, pem), hostname: env.ORACLE_HOSTNAME } : null;
+  } catch {
+    return null;
+  }
+}
+
+const ociConfigText = (c: { tenancy?: string; user?: string; fingerprint?: string; region?: string }) =>
+  `tenancy=${c.tenancy}\nuser=${c.user}\nfingerprint=${c.fingerprint}\nregion=${c.region}`;
+
+function saveOracle(cwd: string, oracle: { creds: OciCredentials; hostname: string }): void {
+  fs.mkdirSync(path.join(cwd, '.omnimesh'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, OCI_KEY_FILE), oracle.creds.privateKey + '\n', { mode: 0o600 });
+  fs.chmodSync(path.join(cwd, OCI_KEY_FILE), 0o600);
+  const { tenancy, user, fingerprint, region } = oracle.creds;
+  writeDotEnv(cwd, { OCI_TENANCY: tenancy, OCI_USER: user, OCI_FINGERPRINT: fingerprint, OCI_REGION: region, ORACLE_HOSTNAME: oracle.hostname });
+}
 
 interface Job {
   running: boolean;
@@ -100,7 +126,12 @@ export async function startWizard(opts: UpOptions & { port?: number; deps?: (log
                 updatedAt: state.updatedAt,
               }
             : null,
-          savedTokens: Object.fromEntries(Object.entries(TOKEN_ENV).map(([p, k]) => [p, Boolean(env[k])])),
+          savedTokens: {
+            ...Object.fromEntries(Object.entries(TOKEN_ENV).map(([p, k]) => [p, Boolean(env[k])])),
+            oracle: Boolean(savedOracle(opts.cwd)),
+            oracleHostname: env.ORACLE_HOSTNAME || null,
+          },
+          settings: state ? { keepAwake: state.keepAwake !== false, watcher: Boolean(state.watcher) } : null,
         });
       }
       if (req.method === 'GET' && url.pathname === '/api/progress') {
@@ -111,8 +142,30 @@ export async function startWizard(opts: UpOptions & { port?: number; deps?: (log
         const body = await readBody(req);
         const saved = readDotEnv(opts.cwd);
         const pick = (p: keyof typeof TOKEN_ENV) => (typeof body.tokens?.[p] === 'string' && body.tokens[p].trim()) || saved[TOKEN_ENV[p]] || undefined;
-        const tokens = { koyeb: pick('koyeb'), render: pick('render'), cloudflare: pick('cloudflare') || '' };
-        if (body.remember) writeDotEnv(opts.cwd, { [TOKEN_ENV.koyeb]: tokens.koyeb, [TOKEN_ENV.render]: tokens.render, [TOKEN_ENV.cloudflare]: tokens.cloudflare || undefined });
+        const tokens = { koyeb: pick('koyeb'), render: pick('render'), cloudflare: pick('cloudflare') || '', github: pick('github') };
+        const previous = loadState(opts.cwd);
+
+        // Oracle: new fields win, then saved ones. `oracle: null` means "no card", so it is skipped.
+        // "Redeploy latest code" sends no oracle field at all and keeps what the last deploy used.
+        let oracle: UpInput['oracle'];
+        const sent = body.oracle && typeof body.oracle === 'object' ? body.oracle : null;
+        if (sent && (sent.config || sent.privateKey)) {
+          // Replacing only the key (or only the config) keeps the saved other half
+          const kept = savedOracle(opts.cwd);
+          const config = String(sent.config || '') || (kept ? ociConfigText(kept.creds) : '');
+          const privateKey = String(sent.privateKey || '') || kept?.creds.privateKey || '';
+          oracle = { creds: parseOciCredentials(config, privateKey), hostname: String(sent.hostname || kept?.hostname || '').trim().toLowerCase() };
+        } else if (sent || (body.oracle === undefined && previous?.nodes.some((n) => n.provider === 'oracle'))) {
+          const kept = savedOracle(opts.cwd);
+          if (kept) oracle = { ...kept, hostname: sent?.hostname ? String(sent.hostname).trim().toLowerCase() : kept.hostname };
+        }
+        const keepAwake = typeof body.keepAwake === 'boolean' ? body.keepAwake : previous?.keepAwake !== false;
+        const watcher = typeof body.watcher === 'boolean' ? body.watcher : Boolean(previous?.watcher);
+
+        if (body.remember) {
+          writeDotEnv(opts.cwd, { [TOKEN_ENV.koyeb]: tokens.koyeb, [TOKEN_ENV.render]: tokens.render, [TOKEN_ENV.cloudflare]: tokens.cloudflare || undefined, [TOKEN_ENV.github]: tokens.github });
+          if (oracle) saveOracle(opts.cwd, oracle);
+        }
 
         Object.assign(job, { running: true, log: [], result: null, error: null });
         const log = (text: string) => {
@@ -120,7 +173,7 @@ export async function startWizard(opts: UpOptions & { port?: number; deps?: (log
           if (job.log.length > 500) job.log.shift();
         };
         const deps = (opts.deps ?? realDeps)(log);
-        runUp(deps, { repoUrl: String(body.repoUrl || ''), branch: body.branch || undefined, startCommand: body.startCommand || undefined, tokens }, opts)
+        runUp(deps, { repoUrl: String(body.repoUrl || ''), branch: body.branch || undefined, startCommand: body.startCommand || undefined, tokens, oracle, keepAwake, watcher }, opts)
           .then((result) => (job.result = result))
           .catch((e: Error) => {
             job.error = e.message;

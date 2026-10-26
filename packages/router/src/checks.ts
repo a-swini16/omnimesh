@@ -19,12 +19,17 @@ export interface NodeCheck {
   at: number;
 }
 
+/** schedule: the router's own cron. manual: the owner pressed Check now. watcher: the GitHub watcher asked. */
+export type CheckTrigger = 'schedule' | 'manual' | 'watcher';
+
 export interface CheckSnapshot {
   /** When the last run finished */
   at: number;
-  trigger: 'schedule' | 'manual';
+  trigger: CheckTrigger;
   /** When a scheduled run last happened; null until the cron has run once */
   lastScheduledAt: number | null;
+  /** When the GitHub watcher last asked for a check; missing until it has run once */
+  lastWatcherAt?: number | null;
   /** Latest result per node URL (kept across runs for nodes a run skipped) */
   nodes: Record<string, NodeCheck>;
 }
@@ -39,8 +44,12 @@ export interface CheckTarget {
   sleepsIfIdle: boolean;
 }
 
-/** Statuses meaning the server or its provider is down or out of quota (same rule as live traffic) */
-const DOWN_STATUSES = new Set([429, 502, 503, 504]);
+/**
+ * Statuses meaning the server or its provider is down or out of quota (same rule as live traffic):
+ * 429 and 502-504, plus Cloudflare's own "could not reach the server" answers (521-526, 530), which a
+ * server behind Cloudflare (a tunnel, Render) returns when the app itself is not running.
+ */
+export const DOWN_STATUSES = new Set([429, 502, 503, 504, 521, 522, 523, 524, 525, 526, 530]);
 const USER_AGENT = `OmniMesh-HealthCheck/${OMNIMESH_VERSION}`;
 /** Cloudflare free Workers allow 50 outgoing requests per run; each server takes up to 2 */
 export const MAX_CHECKED_NODES = 20;
@@ -132,7 +141,7 @@ export async function checkNode(target: CheckTarget, gatewaySecret: string, time
 export interface RunChecksOptions {
   targets: CheckTarget[];
   gatewaySecret: string;
-  trigger: 'schedule' | 'manual';
+  trigger: CheckTrigger;
   previous: CheckSnapshot | null;
   /** Check servers that sleep when idle on a schedule too (only when the owner turned keep-alive on) */
   includeSleepers?: boolean;
@@ -142,8 +151,8 @@ export interface RunChecksOptions {
 /** Check every server in parallel and merge the results into the previous snapshot. */
 export async function runChecks(options: RunChecksOptions): Promise<{ snapshot: CheckSnapshot; checked: Record<string, NodeCheck> }> {
   const { targets, gatewaySecret, trigger, previous } = options;
-  // A manual check waits long enough for a sleeping free server to wake (Render takes 30-50 s)
-  const timeoutMs = options.timeoutMs ?? (trigger === 'manual' ? 60_000 : 10_000);
+  // A manual check waits long enough for a sleeping free server to wake (Render takes about a minute)
+  const timeoutMs = options.timeoutMs ?? (trigger === 'schedule' ? 10_000 : 60_000);
   // Cloudflare free Workers allow 50 outgoing requests per run, so at most MAX_CHECKED_NODES servers are asked
   const due = targets.filter((t) => trigger === 'manual' || options.includeSleepers || !t.sleepsIfIdle).slice(0, MAX_CHECKED_NODES);
   const results = await Promise.all(
@@ -165,6 +174,7 @@ export async function runChecks(options: RunChecksOptions): Promise<{ snapshot: 
       at: now,
       trigger,
       lastScheduledAt: trigger === 'schedule' ? now : previous?.lastScheduledAt ?? null,
+      lastWatcherAt: trigger === 'watcher' ? now : previous?.lastWatcherAt ?? null,
       nodes: { ...kept, ...checked },
     },
   };

@@ -55,8 +55,11 @@ describe('OmniMesh CLI Suite (init, doctor, deploy, chaos, add/remove)', () => {
     // No-card mesh: no card-only providers, and quota-limited nodes carry their free-tier limits
     const nodes = Object.values(parsed.pools).flat() as any[];
     expect(nodes.some((n) => (typeof n === 'string' ? n : n.url).includes('oracle'))).toBe(false);
-    const netlify = nodes.find((n) => n.providerId === 'netlify');
-    expect(netlify.requestsPerMonth).toBe(125000);
+    // Vercel Hobby: 1,000,000 function invocations a month (vercel.com/docs/limits/fair-use-guidelines)
+    const vercel = nodes.find((n) => n.providerId === 'vercel');
+    expect(vercel.requestsPerMonth).toBe(1000000);
+    // Netlify's free plan is credit-based now, so there is no request count to track
+    expect(nodes.find((n) => n.providerId === 'netlify').requestsPerMonth).toBeUndefined();
 
     // Fresh projects still hold placeholder URLs, so doctor must ask for real ones
     expect(await runDoctor({ cwd: tmpDir })).toBe(false);

@@ -151,14 +151,14 @@ Free-tier limits are stored in `limits.json` files, each with a `lastVerified` d
 | Provider | Role | Card | Free tier (as verified) |
 | :--- | :--- | :---: | :--- |
 | [Cloudflare Workers](https://developers.cloudflare.com/workers/platform/pricing/) | Router, KV, rate limiting | No | 100,000 requests/day |
-| [Koyeb](https://www.koyeb.com/pricing) | Compute | No | 1 small service, 512 MB RAM |
-| [Render](https://render.com/docs/free) | Compute (backup) | No | 750 h/month; sleeps after 15 min idle |
-| [Vercel](https://vercel.com/pricing) | Compute (burst) | No | 1M function invocations/month (Hobby is non-commercial) |
-| [Netlify](https://www.netlify.com/pricing/) | Webhooks, functions | No | 125,000 function requests/month |
-| [Deno Deploy](https://deno.com/deploy/pricing) | Auth, light compute | No | 100,000 requests/day |
-| [Neon](https://neon.tech/pricing) / [Supabase](https://supabase.com/pricing) | Postgres (single writer) | No | 0.5 GB / 500 MB database |
-| [Upstash](https://upstash.com/pricing) | Redis for idempotency | No | 10,000 commands/day |
-| [Oracle Cloud](https://www.oracle.com/cloud/free/) | Big compute | **Yes** | 4 ARM CPUs, 24 GB RAM |
+| [Koyeb](https://www.koyeb.com/docs/reference/instances) | Compute | No | 1 service, 512 MB RAM, 0.1 vCPU; sleeps after 1 h idle |
+| [Render](https://render.com/docs/free) | Compute | No | 512 MB, 0.1 CPU, 750 h/month per workspace; sleeps after 15 min idle |
+| [Vercel](https://vercel.com/docs/limits/fair-use-guidelines) | Compute (burst) | No | 1M function invocations, 100 GB/month (Hobby is non-commercial only) |
+| [Netlify](https://www.netlify.com/pricing/) | Webhooks, functions | No | 300 credits/month (credit-based) |
+| [Deno Deploy](https://deno.com/deploy/pricing) | Auth, light compute | No | 1M requests, 20 GiB egress/month |
+| [Neon](https://neon.com/pricing) / [Supabase](https://supabase.com/pricing) | Postgres (single writer) | No | 1 GB per project / 500 MB database |
+| [Upstash](https://upstash.com/docs/redis/overall/pricing) | Redis for idempotency | No | 500K commands/month, 250 MB |
+| [Oracle Cloud](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm) | Big compute (always on) | **Yes** | 2 Arm OCPUs, 12 GB RAM, 10 TB/month out |
 | [Cloudflare R2](https://developers.cloudflare.com/r2/pricing/) | File storage | **Yes** | 10 GB, no egress fees |
 
 Use one legitimate account per provider. OmniMesh never creates or rotates accounts to dodge limits.

@@ -7,15 +7,25 @@ import { callApi, type Deps } from './http.js';
 import { detectRepo, type RepoInfo } from './detect.js';
 import { deployKoyeb, KOYEB_API, type BackendDeployResult } from './koyeb.js';
 import { deployRender, RENDER_API } from './render.js';
-import { deployCloudflareRouter, CLOUDFLARE_API } from './cloudflare.js';
+import { deployCloudflareRouter, cloudflareAccountId, CLOUDFLARE_API } from './cloudflare.js';
+import { deployOracle } from './oracle.js';
+import { ensureTunnel } from './tunnel.js';
+import { installWatcher, watcherScript, watcherWorkflow, watcherSecretNames, GITHUB_API, SCRIPT_PATH, WORKFLOW_PATH } from './watcher.js';
+import type { OciCredentials } from './oci.js';
 import { bundleRouter } from './bundle.js';
 
 export interface UpInput {
   repoUrl: string;
   branch?: string;
   startCommand?: string;
-  tokens: { koyeb?: string; render?: string; cloudflare: string };
+  tokens: { koyeb?: string; render?: string; cloudflare: string; github?: string };
   cloudflareAccountId?: string;
+  /** Only for people with a card: Oracle Always Free, reached through a Cloudflare Tunnel at `hostname` */
+  oracle?: { creds: OciCredentials; hostname: string };
+  /** The router checks sleeping free servers every 5 minutes too, which keeps them awake */
+  keepAwake?: boolean;
+  /** Add the GitHub watcher to the repo (needs tokens.github) */
+  watcher?: boolean;
 }
 
 export interface DeploymentState {
@@ -23,6 +33,9 @@ export interface DeploymentState {
   repo: RepoInfo;
   nodes: BackendDeployResult[];
   router: { url: string; accountId: string; kvNamespaceId: string };
+  oracle?: { hostname: string; tunnelId: string };
+  keepAwake?: boolean;
+  watcher?: boolean;
   updatedAt: string;
 }
 
@@ -38,7 +51,7 @@ export interface UpResult {
 export interface UpOptions {
   cwd: string;
   /** Override provider API base URLs (tests use local mocks) */
-  apis?: { koyeb?: string; render?: string; cloudflare?: string };
+  apis?: { koyeb?: string; render?: string; cloudflare?: string; oracle?: string; github?: string };
   /** Override the router bundle (tests) */
   bundle?: () => Promise<string>;
 }
@@ -100,13 +113,19 @@ function quotaFor(providerId: string): { requestsPerDay?: number; requestsPerMon
   };
 }
 
-/** Router config for one backend deployed on several clouds: every path goes to the whole pool. */
-export function meshConfig(domain: string, nodes: BackendDeployResult[]): OmniMeshConfig {
+/**
+ * Router config for one backend deployed on several clouds: every path goes to the whole pool. Oracle
+ * (always on, the most capacity) answers first once it is up; the free servers that sleep come after.
+ */
+export function meshConfig(domain: string, nodes: BackendDeployResult[], options: { keepAwake?: boolean } = {}): OmniMeshConfig {
+  const rank = (n: BackendDeployResult) => (n.provider === 'oracle' && !n.pending ? 0 : n.pending ? 2 : 1);
+  const ordered = [...nodes].sort((a, b) => rank(a) - rank(b));
   return validateOmniMeshConfig({
-    profile: 'no-card',
+    profile: nodes.some((n) => getProvider(n.provider)?.requiresCard) ? 'with-card' : 'no-card',
     domain,
     defaultPool: '/',
-    pools: { '/': nodes.map((n) => ({ url: n.url, providerId: n.provider, ...quotaFor(n.provider) })) },
+    pools: { '/': ordered.map((n) => ({ url: n.url, providerId: n.provider, ...quotaFor(n.provider) })) },
+    keepAlive: { enabled: Boolean(options.keepAwake) },
   });
 }
 
@@ -116,8 +135,9 @@ export function meshConfig(domain: string, nodes: BackendDeployResult[]): OmniMe
  */
 export async function runUp(deps: Deps, input: UpInput, opts: UpOptions): Promise<UpResult> {
   if (!input.tokens.cloudflare) throw new Error('Connect Cloudflare: it runs the router that gives your app one URL.');
-  const backends = (['koyeb', 'render'] as const).filter((p) => input.tokens[p]);
+  const backends = (['koyeb', 'render', 'oracle'] as const).filter((p) => (p === 'oracle' ? input.oracle : input.tokens[p]));
   if (!backends.length) throw new Error('Connect at least one cloud to host your backend (two or more for failover).');
+
 
   deps.log('Reading your GitHub repository');
   const repo = await detectRepo(deps, input.repoUrl, { branch: input.branch, startCommand: input.startCommand });
@@ -125,15 +145,29 @@ export async function runUp(deps: Deps, input: UpInput, opts: UpOptions): Promis
 
   const previous = loadState(opts.cwd);
   const sameApp = previous && previous.repo.slug === repo.slug;
+  // An installed watcher keeps working without a token; one is needed only to add or update it
+  const watcherInstalled = Boolean(sameApp && previous!.watcher);
+  if (input.watcher && !input.tokens.github && !watcherInstalled) throw new Error('Paste a GitHub token to add the watcher, or turn the watcher off.');
   const env = readDotEnv(opts.cwd);
   const gatewaySecret = env.GATEWAY_SECRET && env.GATEWAY_SECRET.length >= 32 ? env.GATEWAY_SECRET : crypto.randomBytes(32).toString('hex');
   const statusToken = env.OMNIMESH_STATUS_TOKEN && env.OMNIMESH_STATUS_TOKEN.length >= 32 ? env.OMNIMESH_STATUS_TOKEN : crypto.randomBytes(24).toString('hex');
   const appName = sameApp ? previous!.appName : appNameFor(repo);
 
+  const cfApi = opts.apis?.cloudflare ?? CLOUDFLARE_API;
+  const accountId = await cloudflareAccountId(deps, input.tokens.cloudflare, input.cloudflareAccountId, cfApi);
+  let tunnelId: string | undefined;
+
   const results = await Promise.allSettled(
-    backends.map((provider) => {
+    backends.map(async (provider) => {
       const existing = sameApp ? previous!.nodes.find((n) => n.provider === provider) : undefined;
-      const job = { token: input.tokens[provider]!, repo, name: appName, env: { GATEWAY_SECRET: gatewaySecret, OMNIMESH_PROVIDER: provider }, existing };
+      const env = { GATEWAY_SECRET: gatewaySecret, OMNIMESH_PROVIDER: provider };
+      if (provider === 'oracle') {
+        const { hostname, creds } = input.oracle!;
+        const tunnel = await ensureTunnel(deps, { token: input.tokens.cloudflare, accountId, name: `omnimesh-${appName}`, hostname, service: 'http://localhost:8000' }, cfApi);
+        tunnelId = tunnel.tunnelId;
+        return deployOracle(deps, { creds, repo, name: appName, env, hostname, tunnelToken: tunnel.tunnelToken, existing }, opts.apis?.oracle);
+      }
+      const job = { token: input.tokens[provider]!, repo, name: appName, env, existing };
       return provider === 'koyeb' ? deployKoyeb(deps, job, opts.apis?.koyeb ?? KOYEB_API) : deployRender(deps, job, opts.apis?.render ?? RENDER_API);
     })
   );
@@ -149,13 +183,13 @@ export async function runUp(deps: Deps, input: UpInput, opts: UpOptions): Promis
     deps,
     {
       token: input.tokens.cloudflare,
-      accountId: input.cloudflareAccountId,
+      accountId,
       scriptName,
       script,
       secrets: {
         GATEWAY_SECRET: gatewaySecret,
         OMNIMESH_STATUS_TOKEN: statusToken,
-        OMNIMESH_CONFIG_YAML: stringifyOmniMeshConfigYaml(meshConfig(`${scriptName}.workers.dev`, nodes)),
+        OMNIMESH_CONFIG_YAML: stringifyOmniMeshConfigYaml(meshConfig(`${scriptName}.workers.dev`, nodes, { keepAwake: input.keepAwake })),
       },
       vars: {
         OMNIMESH_APP: JSON.stringify({
@@ -164,12 +198,13 @@ export async function runUp(deps: Deps, input: UpInput, opts: UpOptions): Promis
           branch: repo.branch,
           runtime: repo.runtime,
           deployedAt: new Date().toISOString(),
+          watcher: Boolean(input.watcher),
         }),
       },
     },
-    opts.apis?.cloudflare ?? CLOUDFLARE_API
+    cfApi
   );
-  const config = meshConfig(new URL(router.url).host, nodes);
+  const config = meshConfig(new URL(router.url).host, nodes, { keepAwake: input.keepAwake });
 
   deps.log('Checking your app through the router');
   const warnings: string[] = [];
@@ -186,6 +221,40 @@ export async function runUp(deps: Deps, input: UpInput, opts: UpOptions): Promis
   }
   if (nodes.length === 1) warnings.push('Only one cloud is hosting your backend, so there is nothing to fail over to yet. Connect a second one.');
   warnings.push('Your backend URLs on each cloud are still reachable directly. Add gatewayAuth() from @omnimesh/node to accept traffic only through the router.');
+  if (nodes.some((n) => n.provider === 'oracle')) {
+    warnings.push('Oracle can stop Always Free servers that stay almost idle for 7 days (CPU, network and memory all under 20%). The watcher starts it again if that happens.');
+  }
+  if (input.keepAwake && nodes.some((n) => n.provider === 'render')) {
+    warnings.push('Keep-awake keeps your Render server running all month: about 744 of the 750 free hours Render gives your workspace. If you run other free Render services, they share those hours.');
+  }
+
+  if (input.watcher && input.tokens.github) {
+    const labels = Object.fromEntries(nodes.map((n) => [n.url, n.provider]));
+    const secretValues: Record<string, string | undefined> = {
+      OMNIMESH_STATUS_TOKEN: statusToken,
+      KOYEB_API_TOKEN: input.tokens.koyeb,
+      RENDER_API_KEY: input.tokens.render,
+      OCI_TENANCY: input.oracle?.creds.tenancy,
+      OCI_USER: input.oracle?.creds.user,
+      OCI_FINGERPRINT: input.oracle?.creds.fingerprint,
+      OCI_PRIVATE_KEY: input.oracle?.creds.privateKey,
+    };
+    try {
+      await installWatcher(
+        deps,
+        {
+          token: input.tokens.github,
+          slug: repo.slug,
+          branch: repo.defaultBranch,
+          files: { [WORKFLOW_PATH]: watcherWorkflow(router.url, nodes, labels), [SCRIPT_PATH]: watcherScript() },
+          secrets: Object.fromEntries(watcherSecretNames(nodes).flatMap((k) => (secretValues[k] ? [[k, secretValues[k]!]] : []))),
+        },
+        opts.apis?.github ?? GITHUB_API
+      );
+    } catch (e) {
+      warnings.push(`The GitHub watcher was not added: ${(e as Error).message}. Your app is deployed; run omnimesh up again to retry.`);
+    }
+  }
 
   fs.mkdirSync(path.join(opts.cwd, '.omnimesh'), { recursive: true });
   const state: DeploymentState = {
@@ -193,6 +262,9 @@ export async function runUp(deps: Deps, input: UpInput, opts: UpOptions): Promis
     repo,
     nodes,
     router: { url: router.url, accountId: router.accountId, kvNamespaceId: router.kvNamespaceId },
+    ...(input.oracle && tunnelId ? { oracle: { hostname: input.oracle.hostname, tunnelId } } : {}),
+    keepAwake: Boolean(input.keepAwake),
+    watcher: Boolean(input.watcher),
     updatedAt: new Date().toISOString(),
   };
   fs.writeFileSync(path.join(opts.cwd, STATE_FILE), JSON.stringify(state, null, 2), { mode: 0o600 });

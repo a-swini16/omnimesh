@@ -417,7 +417,7 @@
     for (const p of s.pools) {
       const main = p.nodes.find((n) => !n.isBackup);
       if (main && main.sleepsIfIdle && s.routerConfig.strategy !== 'weighted' && !s.keepAlive.enabled) {
-        list.push({ state: 'warn', title: main.label + ' is your main server for ' + p.prefix + ', but it sleeps when idle', detail: 'After a quiet spell, the first visitor waits 30–50 s while it wakes up. Put a cloud that stays on (like Koyeb) first, and keep this one as the backup.' });
+        list.push({ state: 'warn', title: main.label + ' is your main server for ' + p.prefix + ', but it sleeps when idle', detail: 'After a quiet spell the first visitor waits while it wakes up (Koyeb: a few seconds; Render: about a minute). Turn on "Keep my servers awake" in omnimesh up, or add Oracle (always on) as the main server.' });
       }
     }
 
@@ -429,6 +429,15 @@
     if (s.routerConfig.rateLimit.enabled && s.sharing.rateLimit !== 'shared') {
       list.push({ state: 'idle', title: 'Rate limit counted per router copy', detail: 'A bot spread over many addresses gets more requests through. Add the RATE_LIMITER binding (see packages/router/wrangler.toml.example).' });
     }
+    if (s.app && s.app.watcher) {
+      const last = s.checks.lastWatcherAt ? Date.parse(s.checks.lastWatcherAt) : 0;
+      if (!last) list.push({ state: 'idle', title: 'GitHub watcher', detail: 'Added to your repo but has not run yet. GitHub runs it every 10 minutes (the first run can take longer). Check the Actions tab of your repo.' });
+      else if (Date.now() - last > 60 * 60_000) list.push({ state: 'warn', title: 'GitHub watcher stopped', detail: 'It last ran ' + ago(last) + ' but should run every 10 minutes. GitHub turns off scheduled workflows in public repos after 60 days without commits: open your repo → Actions → OmniMesh watcher → Enable workflow.' });
+      else list.push({ state: 'ok', title: 'GitHub watcher', detail: 'Restarts servers that stay down. Last ran ' + ago(last) + '.' });
+    } else {
+      list.push({ state: 'idle', title: 'GitHub watcher', detail: 'Not added. With it, a GitHub Action restarts any server that stays down. Run omnimesh up and connect GitHub to add it.' });
+    }
+
     const order = { bad: 0, warn: 1, idle: 2, ok: 3 };
     return list.sort((a, b) => order[a.state] - order[b.state]);
   }
@@ -923,7 +932,8 @@
   function checksLine(s) {
     if (state.checking) return 'Checking every server… a sleeping free server can take up to a minute to wake up.';
     if (!s.checks.lastAt) return 'No health check has run yet.';
-    return 'Last health check ' + ago(Date.parse(s.checks.lastAt)) + (s.checks.lastTrigger === 'schedule' ? ' (automatic, every 5 minutes)' : ' (you asked)') + '.';
+    const by = { schedule: ' (automatic, every 5 minutes)', watcher: ' (GitHub watcher)', manual: ' (you asked)' }[s.checks.lastTrigger] || '';
+    return 'Last health check ' + ago(Date.parse(s.checks.lastAt)) + by + '.';
   }
 
   function checkButton(s, primary) {

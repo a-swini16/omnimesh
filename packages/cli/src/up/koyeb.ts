@@ -17,6 +17,10 @@ export interface BackendDeployResult {
   provider: string;
   url: string;
   serviceId: string;
+  /** Oracle: the home region the server runs in */
+  region?: string;
+  /** Deployed but not answering yet (still building) */
+  pending?: boolean;
 }
 
 /** Deploys a public GitHub repo as a free Koyeb web service, or redeploys an existing one. */

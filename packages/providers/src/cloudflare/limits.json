@@ -4,7 +4,7 @@
   "requiresCard": false,
   "tier": "free",
   "requestsPerDay": 100000,
-  "requestsPerMonth": 3000000,
+  "requestsPerMonth": null,
   "bandwidthGbPerMonth": null,
   "ramMb": 128,
   "vCpu": null,
@@ -12,6 +12,6 @@
   "maxCpuExecutionMs": 10,
   "sleepsIfIdle": false,
   "idleSleepMinutes": null,
-  "lastVerified": "2026-10-24",
+  "lastVerified": "2026-10-26",
   "sourceUrl": "https://developers.cloudflare.com/workers/platform/pricing/"
 }

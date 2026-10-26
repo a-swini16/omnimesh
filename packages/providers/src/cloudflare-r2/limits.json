@@ -12,6 +12,6 @@
   "maxCpuExecutionMs": null,
   "sleepsIfIdle": false,
   "idleSleepMinutes": null,
-  "lastVerified": "2026-10-24",
+  "lastVerified": "2026-10-26",
   "sourceUrl": "https://developers.cloudflare.com/r2/pricing/"
 }

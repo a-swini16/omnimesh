@@ -5,13 +5,13 @@
   "tier": "free",
   "requestsPerDay": null,
   "requestsPerMonth": null,
-  "bandwidthGbPerMonth": 10000,
-  "ramMb": 24576,
-  "vCpu": 4.0,
+  "bandwidthGbPerMonth": 10240,
+  "ramMb": 12288,
+  "vCpu": 2.0,
   "storageMb": 204800,
   "maxCpuExecutionMs": null,
   "sleepsIfIdle": false,
   "idleSleepMinutes": null,
-  "lastVerified": "2026-10-24",
-  "sourceUrl": "https://www.oracle.com/cloud/free/"
+  "lastVerified": "2026-10-26",
+  "sourceUrl": "https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm"
 }

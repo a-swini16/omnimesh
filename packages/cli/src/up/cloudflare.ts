@@ -3,6 +3,15 @@ import { callApi, type Deps } from './http.js';
 
 export const CLOUDFLARE_API = 'https://api.cloudflare.com/client/v4';
 
+/** The account to deploy into: the given one, or the first the token can see. */
+export async function cloudflareAccountId(deps: Deps, token: string, accountId?: string, apiBase = CLOUDFLARE_API): Promise<string> {
+  if (accountId) return accountId;
+  const accounts = await callApi(deps, 'Cloudflare', `${apiBase}/accounts?per_page=5`, { headers: { Authorization: `Bearer ${token}` } }).then((b) => b.result);
+  const id = accounts?.[0]?.id;
+  if (!id) throw new Error('Cloudflare: this token cannot see any account');
+  return id;
+}
+
 export interface RouterDeployInput {
   token: string;
   /** Optional; the first account the token can see is used otherwise */
@@ -30,8 +39,7 @@ export async function deployCloudflareRouter(deps: Deps, input: RouterDeployInpu
   const cf = (path: string, init: RequestInit & { json?: unknown } = {}) =>
     callApi(deps, 'Cloudflare', `${apiBase}${path}`, { ...init, headers: { ...auth, ...(init.headers as Record<string, string>) } }).then((b) => b.result);
 
-  const accountId: string = input.accountId || (await cf('/accounts?per_page=5'))?.[0]?.id;
-  if (!accountId) throw new Error('Cloudflare: this token cannot see any account');
+  const accountId = await cloudflareAccountId(deps, input.token, input.accountId, apiBase);
 
   deps.log('Cloudflare: preparing the shared health store (KV)');
   const namespaces: Array<{ id: string; title: string }> = await cf(`/accounts/${accountId}/storage/kv/namespaces?per_page=100`);

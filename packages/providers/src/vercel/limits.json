@@ -6,12 +6,12 @@
   "requestsPerDay": null,
   "requestsPerMonth": 1000000,
   "bandwidthGbPerMonth": 100,
-  "ramMb": 1024,
+  "ramMb": 2048,
   "vCpu": 1.0,
   "storageMb": null,
-  "maxCpuExecutionMs": 10000,
+  "maxCpuExecutionMs": null,
   "sleepsIfIdle": false,
   "idleSleepMinutes": null,
-  "lastVerified": "2026-10-24",
-  "sourceUrl": "https://vercel.com/pricing"
+  "lastVerified": "2026-10-26",
+  "sourceUrl": "https://vercel.com/docs/limits/fair-use-guidelines"
 }

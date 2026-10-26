@@ -8,8 +8,12 @@ import { runUp, readDotEnv } from '../src/up/orchestrate.js';
 import { startWizard } from '../src/up/server.js';
 import { bundleRouter } from '../src/up/bundle.js';
 import { mockCloud } from './mock-cloud.js';
+import sodium from 'libsodium-wrappers';
+import { parseOciCredentials } from '../src/up/oci.js';
 
-const APIS = { koyeb: 'https://koyeb.test', render: 'https://render.test', cloudflare: 'https://cloudflare.test' };
+const APIS = { koyeb: 'https://koyeb.test', render: 'https://render.test', cloudflare: 'https://cloudflare.test', oracle: 'https://oracle.test', github: 'https://github.test' };
+const OCI_KEY = fs.readFileSync(path.join(__dirname, 'fixtures', 'oci-test-key.pem'), 'utf-8');
+const OCI_CONFIG = 'user=ocid1.user.oc1..aaaauser\nfingerprint=aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99\ntenancy=ocid1.tenancy.oc1..aaaatest\nregion=us-ashburn-1';
 const TOKENS = { koyeb: 'k'.repeat(40), render: 'r'.repeat(40), cloudflare: 'c'.repeat(40) };
 const fakeBundle = async () => 'export default { fetch() { return new Response("ok") } }';
 
@@ -74,6 +78,68 @@ describe('omnimesh up: give us your backend, we host it', () => {
     expect(result.nodes.map((n) => n.provider)).toEqual(['koyeb']);
     expect(result.failed[0].error).toMatch(/Render: unauthorized.*token/);
     expect(result.warnings.join(' ')).toMatch(/Only one cloud/);
+  });
+
+  it('with a card: Oracle first behind a tunnel, servers kept awake, and the GitHub watcher added', async () => {
+    await sodium.ready;
+    const kp = sodium.crypto_box_keypair();
+    const { deps, calls } = mockCloud({ githubPublicKey: sodium.to_base64(kp.publicKey, sodium.base64_variants.ORIGINAL) });
+    const result = await runUp(
+      deps,
+      {
+        repoUrl: 'https://github.com/me/shop-api',
+        tokens: { ...TOKENS, github: 'ghp_test' },
+        oracle: { creds: parseOciCredentials(OCI_CONFIG, OCI_KEY), hostname: 'oracle.example.com' },
+        keepAwake: true,
+        watcher: true,
+      },
+      { cwd: dir, apis: APIS, bundle: fakeBundle }
+    );
+    expect(result.nodes.map((n) => n.provider).sort()).toEqual(['koyeb', 'oracle', 'render']);
+
+    const config = parseOmniMeshConfigYaml(fs.readFileSync(path.join(dir, 'omnimesh.config.yaml'), 'utf-8'));
+    expect((config.pools['/'] as any[]).map((n) => n.providerId)).toEqual(['oracle', 'koyeb', 'render']); // always-on first
+    expect(config.keepAlive.enabled).toBe(true);
+    expect(config.profile).toBe('with-card');
+
+    const upload = calls.find((c) => c.method === 'PUT' && c.url.endsWith('/workers/scripts/om-shop-api'))!.body;
+    const app = JSON.parse(upload.metadata.bindings.find((b: any) => b.name === 'OMNIMESH_APP').text);
+    expect(app).toMatchObject({ repo: 'github.com/me/shop-api', watcher: true });
+
+    // The watcher went into the repo, with every key as an encrypted secret
+    const secrets = calls.filter((c) => c.method === 'PUT' && c.url.includes('/actions/secrets/')).map((c) => c.url.split('/').pop());
+    expect(secrets.sort()).toEqual(['KOYEB_API_TOKEN', 'OCI_FINGERPRINT', 'OCI_PRIVATE_KEY', 'OCI_TENANCY', 'OCI_USER', 'OMNIMESH_STATUS_TOKEN', 'RENDER_API_KEY']);
+    const files = calls.filter((c) => c.method === 'PUT' && c.url.includes('/contents/'));
+    expect(files.map((c) => c.url.split('/contents/')[1])).toEqual(['.github/workflows/omnimesh-watch.yml', '.github/omnimesh/watch.mjs']);
+    expect(Buffer.from(files[0].body.content, 'base64').toString()).toContain('https://om-shop-api.me.workers.dev');
+
+    expect(result.warnings.join(' ')).toMatch(/Oracle can stop Always Free servers/);
+    expect(result.warnings.join(' ')).toMatch(/744 of the 750 free hours/);
+    const state = JSON.parse(fs.readFileSync(path.join(dir, '.omnimesh', 'deployment.json'), 'utf-8'));
+    expect(state).toMatchObject({ keepAwake: true, watcher: true, oracle: { hostname: 'oracle.example.com', tunnelId: 'tun1' } });
+    expect(state.nodes.find((n: any) => n.provider === 'oracle')).toMatchObject({ serviceId: 'inst1', region: 'us-ashburn-1' });
+  });
+
+  it('"Redeploy latest code" keeps an installed watcher even when no GitHub token was saved', async () => {
+    await sodium.ready;
+    const kp = sodium.crypto_box_keypair();
+    const first = mockCloud({ githubPublicKey: sodium.to_base64(kp.publicKey, sodium.base64_variants.ORIGINAL) });
+    await runUp(first.deps, { repoUrl: 'me/shop-api', tokens: { ...TOKENS, github: 'ghp_test' }, watcher: true }, { cwd: dir, apis: APIS, bundle: fakeBundle });
+    const again = mockCloud();
+    const result = await runUp(again.deps, { repoUrl: 'me/shop-api', tokens: TOKENS, watcher: true }, { cwd: dir, apis: APIS, bundle: fakeBundle });
+    expect(result.appUrl).toBe('https://om-shop-api.me.workers.dev');
+    expect(again.calls.some((c) => c.url.startsWith('https://github.test'))).toBe(false);
+    expect(JSON.parse(fs.readFileSync(path.join(dir, '.omnimesh', 'deployment.json'), 'utf-8')).watcher).toBe(true);
+    // A brand-new watcher still needs the token
+    fs.rmSync(path.join(dir, '.omnimesh'), { recursive: true });
+    await expect(runUp(mockCloud().deps, { repoUrl: 'me/shop-api', tokens: TOKENS, watcher: true }, { cwd: dir, apis: APIS, bundle: fakeBundle })).rejects.toThrow(/GitHub token/);
+  });
+
+  it('keeps the other clouds when Oracle has no free capacity, and says why', async () => {
+    const { deps } = mockCloud({ oracleCapacity: [] });
+    const result = await runUp(deps, { repoUrl: 'me/shop-api', tokens: TOKENS, oracle: { creds: parseOciCredentials(OCI_CONFIG, OCI_KEY), hostname: 'oracle.example.com' } }, { cwd: dir, apis: APIS, bundle: fakeBundle });
+    expect(result.nodes.map((n) => n.provider).sort()).toEqual(['koyeb', 'render']);
+    expect(result.failed).toEqual([{ provider: 'oracle', error: expect.stringMatching(/no free Arm capacity/) }]);
   });
 
   it('says so when Cloudflare will not schedule the health checks, and still deploys', async () => {
@@ -170,7 +236,36 @@ describe('omnimesh up wizard server is locked to this computer', () => {
     const env = readDotEnv(dir);
     expect(env.KOYEB_API_TOKEN).toBe(TOKENS.koyeb);
     const state = await (await fetch(`${base()}/api/state`, { headers: h })).json();
-    expect(state.savedTokens).toEqual({ koyeb: true, render: true, cloudflare: true });
+    expect(state.savedTokens).toEqual({ koyeb: true, render: true, cloudflare: true, github: false, oracle: false, oracleHostname: null });
     expect(state.deployed.dashboardUrl).toBe('https://om-shop-api.me.workers.dev/_omnimesh/dashboard');
+  });
+
+  it('saves the Oracle key readable only by you, and reuses it on "Redeploy latest code"', async () => {
+    const h = { 'X-OmniMesh-Key': key, 'Content-Type': 'application/json' };
+    const wait = async () => {
+      for (let i = 0; i < 100; i++) {
+        const job = await (await fetch(`${base()}/api/progress`, { headers: h })).json();
+        if (!job.running) return job;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    };
+    const bad = await fetch(`${base()}/api/deploy`, { method: 'POST', headers: h, body: JSON.stringify({ repoUrl: 'me/shop-api', tokens: TOKENS, oracle: { config: 'nonsense', privateKey: OCI_KEY, hostname: 'oracle.example.com' } }) });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toMatch(/tenancy=/);
+
+    await fetch(`${base()}/api/deploy`, { method: 'POST', headers: h, body: JSON.stringify({ repoUrl: 'me/shop-api', tokens: TOKENS, oracle: { config: OCI_CONFIG, privateKey: OCI_KEY, hostname: 'oracle.example.com' }, keepAwake: false, remember: true }) });
+    expect((await wait()).result.nodes.map((n: any) => n.provider)).toContain('oracle');
+    const keyFile = path.join(dir, '.omnimesh', 'oci_api_key.pem');
+    expect(fs.statSync(keyFile).mode & 0o077).toBe(0);
+    expect(readDotEnv(dir)).toMatchObject({ OCI_TENANCY: 'ocid1.tenancy.oc1..aaaatest', ORACLE_HOSTNAME: 'oracle.example.com' });
+    const state = await (await fetch(`${base()}/api/state`, { headers: h })).json();
+    expect(state.savedTokens).toMatchObject({ oracle: true, oracleHostname: 'oracle.example.com' });
+    expect(state.settings).toEqual({ keepAwake: false, watcher: false });
+
+    // The "Redeploy latest code" button sends only the repo
+    await fetch(`${base()}/api/deploy`, { method: 'POST', headers: h, body: JSON.stringify({ repoUrl: 'me/shop-api' }) });
+    const again = await wait();
+    expect(again.error).toBeNull();
+    expect(again.result.nodes.map((n: any) => n.provider)).toContain('oracle');
   });
 });

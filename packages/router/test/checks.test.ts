@@ -100,7 +100,7 @@ describe('Server checks, pause and resume', () => {
       profile: 'no-card',
       domain: 'x.test',
       defaultPool: '/',
-      pools: { '/': [{ url: locked, providerId: 'koyeb' }, { url: open, providerId: 'render' }] },
+      pools: { '/': [{ url: locked, providerId: 'oracle' }, { url: open, providerId: 'render' }] },
     });
     const targets = checkTargets(config);
     expect(targets.map((t) => t.sleepsIfIdle)).toEqual([false, true]);
@@ -139,6 +139,31 @@ describe('Server checks, pause and resume', () => {
     } finally {
       lockedDown = false;
     }
+  });
+
+  it('the GitHub watcher\'s check skips sleeping servers unless keep-awake is on, and is recorded', async () => {
+    const make = (keepAwake: boolean) =>
+      createRouterApp({
+        config: validateOmniMeshConfig({ profile: 'no-card', domain: 'x.test', defaultPool: '/', pools: { '/': [{ url: locked, providerId: 'oracle' }, { url: open, providerId: 'render' }] }, keepAlive: { enabled: keepAwake } }),
+        gatewaySecret: SECRET,
+        statusToken: TOKEN,
+      });
+    const off = await (await post(make(false), '/_omnimesh/actions/check', { source: 'watcher' })).json();
+    expect(Object.keys(off.nodes)).toEqual([locked]); // render sleeps when idle: left alone
+
+    const app = make(true);
+    const on = await (await post(app, '/_omnimesh/actions/check', { source: 'watcher' })).json();
+    expect(Object.keys(on.nodes).sort()).toEqual([locked, open].sort());
+    const status = await (await app.request('/_omnimesh/status', { headers: auth })).json();
+    expect(status.checks.lastTrigger).toBe('watcher');
+    expect(Date.parse(status.checks.lastWatcherAt)).toBeGreaterThan(Date.now() - 10_000);
+  });
+
+  it('counts Cloudflare\'s "cannot reach the server" answers (530, 52x) as down', async () => {
+    const a = new Hono();
+    a.get('/health', (c) => c.text('error code: 1033', 530 as any));
+    const url = await start(a);
+    expect(await checkNode({ url, pool: '/', label: 'n', healthPath: '/health', sleepsIfIdle: false }, SECRET, 2000)).toMatchObject({ state: 'down', status: 530 });
   });
 
   it('hides every action from callers without the sign-in key', async () => {
@@ -214,7 +239,8 @@ describe('Server checks, pause and resume', () => {
     expect(status.checks.lastTrigger).toBe('manual');
     expect(status.checks.lastScheduledAt).toBeNull();
     const byLabel = Object.fromEntries(status.pools[0].nodes.map((n: any) => [n.label, n]));
-    expect(byLabel.koyeb).toMatchObject({ state: 'healthy', lock: 'locked', sleepsIfIdle: false });
+    // Koyeb's free instance scales to zero after 1 hour without traffic
+    expect(byLabel.koyeb).toMatchObject({ state: 'healthy', lock: 'locked', sleepsIfIdle: true });
     expect(byLabel.render).toMatchObject({ state: 'healthy', lock: 'open', sleepsIfIdle: true });
 
     const again = await post(app, '/_omnimesh/actions/check', {});

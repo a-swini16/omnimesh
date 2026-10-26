@@ -4,6 +4,7 @@ import { openBrowser } from '../browser.js';
 import { loadState, readDotEnv, writeDotEnv } from '../up/orchestrate.js';
 import { callApi, realDeps, type Deps } from '../up/http.js';
 import { CLOUDFLARE_API } from '../up/cloudflare.js';
+import { installWatcher } from '../up/watcher.js';
 
 function deployed(cwd: string) {
   const state = loadState(cwd);
@@ -31,7 +32,7 @@ export async function runOpen(options: { cwd?: string; open?: boolean } = {}): P
 }
 
 /** `omnimesh token [--rotate]`: print the dashboard sign-in key, or replace it on the live router. */
-export async function runToken(options: { cwd?: string; rotate?: boolean; deps?: Deps; apiBase?: string } = {}): Promise<boolean> {
+export async function runToken(options: { cwd?: string; rotate?: boolean; deps?: Deps; apiBase?: string; githubApi?: string } = {}): Promise<boolean> {
   const cwd = options.cwd || process.cwd();
   const env = readDotEnv(cwd);
   if (!options.rotate) {
@@ -60,5 +61,18 @@ export async function runToken(options: { cwd?: string; rotate?: boolean; deps?:
   });
   writeDotEnv(cwd, { OMNIMESH_STATUS_TOKEN: fresh });
   console.log(pc.green('✔ New sign-in key is live on your router; the old one no longer works. Run omnimesh open to sign in.'));
+  // The GitHub watcher signs in with its own copy of the key
+  if (state.watcher) {
+    if (!env.OMNIMESH_GITHUB_TOKEN) {
+      console.log(pc.yellow('! Your GitHub watcher still has the old key. Run omnimesh up and deploy once with your GitHub token to update it.'));
+      return true;
+    }
+    try {
+      await installWatcher(deps, { token: env.OMNIMESH_GITHUB_TOKEN, slug: state.repo.slug, branch: state.repo.defaultBranch ?? state.repo.branch, files: {}, secrets: { OMNIMESH_STATUS_TOKEN: fresh } }, options.githubApi);
+      console.log(pc.green('✔ Your GitHub watcher has the new key too.'));
+    } catch (e) {
+      console.log(pc.yellow(`! Could not update the key in GitHub (${(e as Error).message}). Run omnimesh up and deploy once to fix it.`));
+    }
+  }
   return true;
 }

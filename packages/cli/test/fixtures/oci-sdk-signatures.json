@@ -1,0 +1,23 @@
+{
+  "note": "Signed by Oracle's official Python SDK (oci 2.160.0, oci.signer.Signer) with oci-test-key.pem, date Thu, 05 Jan 2014 21:31:40 GMT. A throwaway key made only for this test.",
+  "requests": [
+    {
+      "method": "GET",
+      "url": "https://iaas.us-ashburn-1.oraclecloud.com/20160918/images?compartmentId=ocid1.tenancy.oc1..aaaatest&shape=VM.Standard.A1.Flex&sortBy=TIMECREATED",
+      "body": null,
+      "authorization": "Signature algorithm=\"rsa-sha256\",headers=\"date (request-target) host\",keyId=\"ocid1.tenancy.oc1..aaaatest/ocid1.user.oc1..aaaauser/aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99\",signature=\"DbCHOL/47clNm59QPl60ZvjdYfld80lAN8f9IgM14uD3wU+SA0Z/6yZN8O2HvQpeL/HqRs3dAGm9BRhrIcsIDVr8ncCPhts3jtZkPkliB95TscHPzUzhMOH/wDRKurgJZ6vOU+CPT2yf8IOEaODrKJlsfzqjnsgvTM8yNeOASMlB4unsl+QrOEr4O7Wl0uejD/i+pzC2+YlyBpwcN2UP50v/pVD9VS35s31rcfYscvIPhkSzwFopVAUNsVSgLc6ebc6t0OjUDZ4ZSfnkvBAsuHALhCuCthY9DqDcU1GdnsU/gLqOecZqFkeSF7HhQebpFUaBctWzCfVzjl9cbi7yug==\",version=\"1\""
+    },
+    {
+      "method": "POST",
+      "url": "https://iaas.us-ashburn-1.oraclecloud.com/20160918/vcns",
+      "body": "{\"compartmentId\": \"x\", \"cidrBlocks\": [\"10.0.0.0/16\"], \"displayName\": \"omnimesh-vcn\"}",
+      "authorization": "Signature algorithm=\"rsa-sha256\",headers=\"date (request-target) host content-length content-type x-content-sha256\",keyId=\"ocid1.tenancy.oc1..aaaatest/ocid1.user.oc1..aaaauser/aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99\",signature=\"zNDFn0yXGWapYpND6h3ZvfvFE7Sw7N3v/Z8AWhb+T8XZ4XDNCfSoJK1wMBxgt2UYOHmtpj6q1PkF/Jmild3Kuj6Rrt9T9yeKhUbELvJm19VMLZhfJOlGMizhMd6i2+5TkE8xAaXr5MGFLL7QjKKoLsbXIUDQ3EOJquye1asq6+HWqD9qt20SbR35OlvpGQJlXpbfLl2Ti0rEjQvP2FSmbuJncSJtnWlVTllNdS2o0XvFGVQtq7D0SYufeF8z3Sr/t5t3rMKZnbuCcCV1PktPgTJX5rldsnK115E37i1Fpx4sbxDN+Ac0BNYyq0b9rnhCIBcHa//g/ntKA1ON1Vj4qg==\",version=\"1\""
+    },
+    {
+      "method": "POST",
+      "url": "https://iaas.us-ashburn-1.oraclecloud.com/20160918/instances/ocid1.instance.oc1..abc?action=START",
+      "body": "",
+      "authorization": "Signature algorithm=\"rsa-sha256\",headers=\"date (request-target) host content-length content-type x-content-sha256\",keyId=\"ocid1.tenancy.oc1..aaaatest/ocid1.user.oc1..aaaauser/aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99\",signature=\"wTR2n+C2QTi3kCEmx+D2CZk58Fv+EVBJrGnMTzDBkzCYm8n7DYg/vzL3724C3PjvC3220/3mWLyvFZ4BO2/D2HzLT58D0RAa7R4+uLCATrSe2GVyNjY0lNXk9P8U9hmrL1Cx9aTDLAZZDpTQDqJsyPyGQ5JthqYowcl9LZ31+L5+NVWoDR/xTiBwZXtiLzvhvdPUeuY+Pd11u6swGHk6/YI6dpTtMHIXm+efAxYb2QGXYBKpXl90sBMob9K+SDBUM12Dz4n6hyj5VKb3AlVrGl3dRD3skggHqTR087crlGFJnkAnYDMvc2evy0+fcC5Keq0oWeAnku8EnPtFnDkgcA==\",version=\"1\""
+    }
+  ]
+}

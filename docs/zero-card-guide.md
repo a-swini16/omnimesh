@@ -19,12 +19,12 @@ OmniMesh never creates accounts for you: providers require you to own them, and 
 | Job | Provider | Free tier (check `lastVerified` in each `limits.json`) |
 | :--- | :--- | :--- |
 | Router and domain | Cloudflare Workers | 100,000 requests/day (this is the mesh's free ceiling) |
-| Main compute | Koyeb | 1 small always-on service |
+| Main compute | Koyeb | 1 service, 512 MB; sleeps after 1 h idle (keep-awake keeps it on) |
 | Backup compute | Render | 750 hours/month; sleeps after 15 min idle |
 | Burst and auth | Vercel, Deno Deploy | Serverless functions (Vercel Hobby is non-commercial only) |
-| Webhooks | Netlify | 125,000 function requests/month |
+| Webhooks | Netlify | 300 credits/month (credit-based plan) |
 | Database | Neon or Supabase | One shared Postgres (the single writer) |
-| Idempotency keys | Upstash Redis | 10,000 commands/day |
+| Idempotency keys | Upstash Redis | 500K commands/month |
 | File storage | Supabase Storage | 1 GB |
 
 ## Steps

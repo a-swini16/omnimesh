@@ -3,15 +3,15 @@
   "displayName": "Upstash Serverless Redis",
   "requiresCard": false,
   "tier": "free",
-  "requestsPerDay": 10000,
-  "requestsPerMonth": 300000,
-  "bandwidthGbPerMonth": null,
-  "ramMb": 256,
+  "requestsPerDay": null,
+  "requestsPerMonth": 500000,
+  "bandwidthGbPerMonth": 10,
+  "ramMb": null,
   "vCpu": null,
-  "storageMb": 256,
+  "storageMb": 250,
   "maxCpuExecutionMs": null,
   "sleepsIfIdle": false,
   "idleSleepMinutes": null,
-  "lastVerified": "2026-10-24",
-  "sourceUrl": "https://upstash.com/pricing"
+  "lastVerified": "2026-10-26",
+  "sourceUrl": "https://upstash.com/docs/redis/overall/pricing"
 }

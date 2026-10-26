@@ -6,7 +6,7 @@ import { prepareBufferedRequest, fetchWithTimeout, BodyTooLargeError, DEFAULT_MA
 import { MemoryRateLimiter, type RateLimiter } from './rate-limiter.js';
 import { RouterTelemetry } from './telemetry.js';
 import { registerDashboard } from './dashboard.js';
-import { checkTargets, MAX_CHECKED_NODES, recordDownServers, runChecks, SCHEDULE_CRON, type NodeCheck } from './checks.js';
+import { checkTargets, DOWN_STATUSES, MAX_CHECKED_NODES, recordDownServers, runChecks, SCHEDULE_CRON, type NodeCheck } from './checks.js';
 import { getAllProviders } from '@omnimesh/providers';
 
 export interface RouterOptions {
@@ -22,6 +22,8 @@ export interface RouterOptions {
   telemetry?: RouterTelemetry;
   /** JSON written by `omnimesh up` (OMNIMESH_APP): which repo and branch is deployed, and when */
   appInfo?: string;
+  /** Minimum time between on-demand checks (default 20 s; tests shorten it) */
+  manualCheckCooldownMs?: number;
 }
 
 export interface AppInfo {
@@ -30,6 +32,8 @@ export interface AppInfo {
   branch: string;
   runtime: string;
   deployedAt: string;
+  /** omnimesh up added the GitHub watcher to the repo */
+  watcher: boolean;
 }
 
 /** Keep only the known fields, as short strings, so the dashboard never renders anything unexpected. */
@@ -38,7 +42,7 @@ export function parseAppInfo(raw: string | undefined): AppInfo | null {
   try {
     const v = JSON.parse(raw);
     const str = (x: unknown) => (typeof x === 'string' ? x.slice(0, 200) : '');
-    const info = { repo: str(v.repo), repoUrl: str(v.repoUrl), branch: str(v.branch), runtime: str(v.runtime), deployedAt: str(v.deployedAt) };
+    const info = { repo: str(v.repo), repoUrl: str(v.repoUrl), branch: str(v.branch), runtime: str(v.runtime), deployedAt: str(v.deployedAt), watcher: v.watcher === true };
     if (!info.repo) return null;
     if (!/^https:\/\/github\.com\//.test(info.repoUrl)) info.repoUrl = '';
     return info;
@@ -65,7 +69,8 @@ interface Candidate {
 }
 
 // Statuses that mean the node or its provider is down/out of quota, not that one endpoint is buggy
-const HARD_FAILURE_STATUSES = new Set([429, 502, 503, 504]);
+// (the same list the health checks use)
+const HARD_FAILURE_STATUSES = DOWN_STATUSES;
 // Methods whose app-level 5xx may be retried on another node
 const READ_METHODS = new Set(['GET', 'HEAD']);
 /** A pause is for testing failover or short maintenance, never a way to switch a server off for good */
@@ -312,6 +317,7 @@ export function createRouterApp(options: RouterOptions) {
         lastAt: checks ? new Date(checks.at).toISOString() : null,
         lastTrigger: checks?.trigger ?? null,
         lastScheduledAt: checks?.lastScheduledAt ? new Date(checks.lastScheduledAt).toISOString() : null,
+        lastWatcherAt: checks?.lastWatcherAt ? new Date(checks.lastWatcherAt).toISOString() : null,
         schedule: SCHEDULE_CRON,
       },
       totals: telemetry.totals,
@@ -407,11 +413,13 @@ export function createRouterApp(options: RouterOptions) {
     return c.json({ resumed: node.label, shared });
   });
 
-  // Check every server now, including free servers that sleep (a manual check may wake them)
+  // Check every server now. The owner's check includes free servers that sleep (it may wake them); the
+  // GitHub watcher's check includes them only when keep-awake is on, so it never keeps them awake by itself
   let lastManualCheck = 0;
   app.post('/_omnimesh/actions/check', async (c) => {
     if (!isOperator(c.req.header('authorization'))) return c.json({ error: 'Not Found' }, 404);
-    const wait = lastManualCheck + MANUAL_CHECK_COOLDOWN_MS - Date.now();
+    const watcher = (await readAction(c)).source === 'watcher';
+    const wait = lastManualCheck + (options.manualCheckCooldownMs ?? MANUAL_CHECK_COOLDOWN_MS) - Date.now();
     if (wait > 0) {
       c.header('Retry-After', String(Math.ceil(wait / 1000)));
       return c.json({ error: `Checked a moment ago. Try again in ${Math.ceil(wait / 1000)} s.`, code: 'ERR_CHECK_COOLDOWN' }, 429);
@@ -419,10 +427,17 @@ export function createRouterApp(options: RouterOptions) {
     lastManualCheck = Date.now();
     // Read past the cache: merging into a stale snapshot would undo a scheduled run that just finished
     const previous = await healthStore.getChecks(true);
-    const { snapshot, checked } = await runChecks({ targets, gatewaySecret, trigger: 'manual', previous });
+    const { snapshot, checked } = await runChecks({
+      targets,
+      gatewaySecret,
+      trigger: watcher ? 'watcher' : 'manual',
+      previous,
+      includeSleepers: !watcher || config.keepAlive.enabled,
+    });
     const latest = await healthStore.getChecks(true);
     // A scheduled run finished while this one was waiting: keep its timestamp
     if (latest?.lastScheduledAt && latest.lastScheduledAt > (snapshot.lastScheduledAt ?? 0)) snapshot.lastScheduledAt = latest.lastScheduledAt;
+    if (latest?.lastWatcherAt && latest.lastWatcherAt > (snapshot.lastWatcherAt ?? 0)) snapshot.lastWatcherAt = latest.lastWatcherAt;
     await healthStore.saveChecks(snapshot);
     await recordDownServers(healthStore, previous, checked);
     for (const [nodeUrl, result] of Object.entries(checked)) {

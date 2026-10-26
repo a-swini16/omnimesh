@@ -7,6 +7,8 @@ import { DASHBOARD_HTML, DASHBOARD_JS } from '../../router/src/dashboard-assets.
 import { runOpen, runToken } from '../src/commands/open.js';
 import { runDeploy } from '../src/commands/deploy.js';
 import { writeDotEnv, readDotEnv } from '../src/up/orchestrate.js';
+import sodium from 'libsodium-wrappers';
+import { mockCloud } from './mock-cloud.js';
 import type { Deps } from '../src/up/http.js';
 
 function writeState(dir: string) {
@@ -112,5 +114,22 @@ describe('Phase 0: production only, plain words, easy sign-in', () => {
     expect(nodeHealthPath(c.pools['/'][0])).toBe('/healthz');
     expect(nodeHealthPath(c.pools['/'][1])).toBe('/health');
     expect(() => validateOmniMeshConfig({ pools: { '/': [{ url: 'https://a.example.com', healthPath: 'healthz' }] } })).toThrow(/healthPath/);
+  });
+
+  it('rotating the sign-in key also updates the GitHub watcher\'s copy', async () => {
+    writeState(dir);
+    const statePath = path.join(dir, '.omnimesh', 'deployment.json');
+    fs.writeFileSync(statePath, JSON.stringify({ ...JSON.parse(fs.readFileSync(statePath, 'utf-8')), watcher: true }));
+    writeDotEnv(dir, { CLOUDFLARE_API_TOKEN: 'c'.repeat(40), OMNIMESH_STATUS_TOKEN: 'old', OMNIMESH_GITHUB_TOKEN: 'ghp_test' });
+    await sodium.ready;
+    const kp = sodium.crypto_box_keypair();
+    const cloud = mockCloud({ githubPublicKey: sodium.to_base64(kp.publicKey, sodium.base64_variants.ORIGINAL) });
+    const deps = { ...cloud.deps, fetch: async (u: string, i?: RequestInit) => (u.includes('/workers/scripts/om-shop-api/secrets') ? new Response('{"success":true,"result":{}}') : cloud.deps.fetch(u, i)) } as Deps;
+    expect(await runToken({ cwd: dir, rotate: true, deps, apiBase: 'https://cloudflare.test', githubApi: 'https://github.test' })).toBe(true);
+    const put = cloud.calls.find((c) => c.url === 'https://github.test/repos/me/shop-api/actions/secrets/OMNIMESH_STATUS_TOKEN')!;
+    const plain = sodium.to_string(sodium.crypto_box_seal_open(sodium.from_base64(put.body.encrypted_value, sodium.base64_variants.ORIGINAL), kp.publicKey, kp.privateKey));
+    expect(plain).toBe(readDotEnv(dir).OMNIMESH_STATUS_TOKEN);
+    expect(cloud.calls.some((c) => c.url.includes('/contents/'))).toBe(false); // only the secret changes
+    expect(logs.join('\n')).toMatch(/GitHub watcher has the new key/);
   });
 });

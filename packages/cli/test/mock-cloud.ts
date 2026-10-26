@@ -1,8 +1,28 @@
 import type { Deps } from '../src/up/http.js';
 
 /** A fake cloud: GitHub, Koyeb, Render and Cloudflare APIs plus the deployed router, all in memory. */
-export function mockCloud(opts: { renderBroken?: boolean; privateRepo?: boolean; noSubdomain?: boolean; cronLimit?: boolean } = {}) {
-  const calls: Array<{ method: string; url: string; body: any }> = [];
+export interface MockCloudOptions {
+  renderBroken?: boolean;
+  privateRepo?: boolean;
+  noSubdomain?: boolean;
+  cronLimit?: boolean;
+  /** Oracle availability domains that still have free Arm capacity (default: all) */
+  oracleCapacity?: string[];
+  /** Arm OCPUs already used by other servers in the tenancy */
+  oracleUsedOcpus?: number;
+  /** State of an Oracle server created earlier */
+  oracleInstanceState?: string;
+  /** The hostname already has a DNS record pointing elsewhere */
+  dnsTaken?: boolean;
+  /** Base64 public key GitHub would hand out for encrypting secrets */
+  githubPublicKey?: string;
+}
+
+const ADS = ['Uocm:US-ASHBURN-AD-1', 'Uocm:US-ASHBURN-AD-2', 'Uocm:US-ASHBURN-AD-3'];
+
+/** A fake cloud: GitHub, Koyeb, Render, Cloudflare and Oracle APIs plus the deployed router, all in memory. */
+export function mockCloud(opts: MockCloudOptions = {}) {
+  const calls: Array<{ method: string; url: string; body: any; headers: Headers }> = [];
   let koyebPolls = 0;
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -11,8 +31,8 @@ export function mockCloud(opts: { renderBroken?: boolean; privateRepo?: boolean;
     let body: any = null;
     if (init.body instanceof FormData) {
       body = { metadata: JSON.parse(await (init.body.get('metadata') as Blob).text()), script: await (init.body.get('worker.js') as Blob).text() };
-    } else if (typeof init.body === 'string') body = JSON.parse(init.body);
-    calls.push({ method, url, body });
+    } else if (typeof init.body === 'string') body = init.body ? JSON.parse(init.body) : '';
+    calls.push({ method, url, body, headers: new Headers(init.headers) });
     const u = new URL(url);
     const p = u.pathname;
 
@@ -48,6 +68,49 @@ export function mockCloud(opts: { renderBroken?: boolean; privateRepo?: boolean;
           : json({ success: true, result: { schedules: body } });
       }
       if (method === 'GET' && p === '/accounts/acc1/workers/subdomain') return opts.noSubdomain ? json({ success: false, errors: [{ message: 'no subdomain' }] }, 404) : json({ success: true, result: { subdomain: 'me' } });
+    }
+    if (u.host === 'cloudflare.test') {
+      const cf = (result: unknown) => json({ success: true, result });
+      if (method === 'GET' && p === '/zones') return cf(u.searchParams.get('name') === 'example.com' ? [{ id: 'zone1' }] : []);
+      if (method === 'GET' && p === '/accounts/acc1/cfd_tunnel') return cf(calls.some((c) => c.method === 'POST' && c.url.endsWith('/cfd_tunnel')) ? [{ id: 'tun1' }] : []);
+      if (method === 'POST' && p === '/accounts/acc1/cfd_tunnel') return cf({ id: 'tun1', name: body.name });
+      if (method === 'PUT' && p === '/accounts/acc1/cfd_tunnel/tun1/configurations') return cf({});
+      if (method === 'GET' && p === '/zones/zone1/dns_records') return cf(opts.dnsTaken ? [{ id: 'r1', type: 'A', content: '203.0.113.7' }] : []);
+      if (method === 'POST' && p === '/zones/zone1/dns_records') return cf({ id: 'r2' });
+      if (method === 'GET' && p === '/accounts/acc1/cfd_tunnel/tun1/token') return cf('tunnel-token-xyz');
+    }
+    if (u.host === 'oracle.test') {
+      const oci = p.replace(/^\/(iaas|identity)\/20160918/, '');
+      if (oci.endsWith('/regionSubscriptions')) return json([{ regionName: 'eu-frankfurt-1', isHomeRegion: false }, { regionName: 'us-ashburn-1', isHomeRegion: true }]);
+      if (oci === '/availabilityDomains') return json(ADS.map((name) => ({ name })));
+      if (method === 'GET' && oci === '/instances') {
+        return json(opts.oracleUsedOcpus ? [{ displayName: 'my-other-vm', shape: 'VM.Standard.A1.Flex', lifecycleState: 'RUNNING', shapeConfig: { ocpus: opts.oracleUsedOcpus } }] : []);
+      }
+      if (method === 'GET' && oci === '/vcns') return json([]);
+      if (method === 'POST' && oci === '/vcns') return json({ id: 'vcn1', lifecycleState: 'PROVISIONING', defaultRouteTableId: 'rt1', defaultSecurityListId: 'sl1' });
+      if (method === 'GET' && oci === '/vcns/vcn1') return json({ id: 'vcn1', lifecycleState: 'AVAILABLE', defaultRouteTableId: 'rt1', defaultSecurityListId: 'sl1' });
+      if (method === 'GET' && (oci === '/internetGateways' || oci === '/subnets')) return json([]);
+      if (method === 'POST' && oci === '/internetGateways') return json({ id: 'igw1' });
+      if (method === 'PUT' && (oci === '/routeTables/rt1' || oci === '/securityLists/sl1')) return json({});
+      if (method === 'POST' && oci === '/subnets') return json({ id: 'sub1' });
+      if (method === 'GET' && oci === '/subnets/sub1') return json({ id: 'sub1', lifecycleState: 'AVAILABLE' });
+      if (method === 'GET' && oci === '/images') {
+        return json([{ id: 'img-min', displayName: 'Canonical-Ubuntu-24.04-Minimal-aarch64-2026.09.18-0' }, { id: 'img1', displayName: 'Canonical-Ubuntu-24.04-aarch64-2026.09.18-0' }]);
+      }
+      if (method === 'POST' && oci === '/instances') {
+        const capacity = opts.oracleCapacity ?? ADS;
+        if (!capacity.includes(body.availabilityDomain)) return json({ code: 'InternalError', message: 'Out of host capacity.' }, 500);
+        return json({ id: 'inst1', lifecycleState: 'PROVISIONING' });
+      }
+      if (method === 'GET' && oci.startsWith('/instances/')) return json({ id: 'inst1', lifecycleState: opts.oracleInstanceState ?? 'RUNNING' });
+      if (method === 'POST' && oci.startsWith('/instances/')) return json({ id: 'inst1', lifecycleState: 'STARTING' });
+    }
+    if (u.host === 'oracle.example.com') return json({ ok: true });
+    if (u.host === 'github.test') {
+      if (method === 'GET' && p === '/repos/me/shop-api/actions/secrets/public-key') return json({ key_id: 'k1', key: opts.githubPublicKey ?? '' });
+      if (method === 'PUT' && p.startsWith('/repos/me/shop-api/actions/secrets/')) return new Response(null, { status: 201 });
+      if (method === 'GET' && p.startsWith('/repos/me/shop-api/contents/')) return json({ message: 'Not Found' }, 404);
+      if (method === 'PUT' && p.startsWith('/repos/me/shop-api/contents/')) return json({ content: {} }, 201);
     }
     if (u.host === 'om-shop-api.me.workers.dev') {
       if (p === '/_omnimesh/status') return json({ pools: [{ nodes: [{}, {}] }] });

@@ -5,13 +5,13 @@
   "tier": "free",
   "requestsPerDay": null,
   "requestsPerMonth": null,
-  "bandwidthGbPerMonth": 100,
+  "bandwidthGbPerMonth": null,
   "ramMb": 512,
   "vCpu": 0.1,
   "storageMb": 2048,
   "maxCpuExecutionMs": null,
-  "sleepsIfIdle": false,
-  "idleSleepMinutes": null,
-  "lastVerified": "2026-10-24",
-  "sourceUrl": "https://www.koyeb.com/pricing"
+  "sleepsIfIdle": true,
+  "idleSleepMinutes": 60,
+  "lastVerified": "2026-10-26",
+  "sourceUrl": "https://www.koyeb.com/docs/reference/instances"
 }

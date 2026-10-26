@@ -40,17 +40,47 @@
     </section>
 
     <section class="card step">
-      <div class="step-head"><span class="num">2</span><h2>Connect your clouds</h2><span class="pill">all free, no credit card</span></div>
-      <p class="muted">Create a free account on each one and paste an API token. Connect at least <strong>two hosting clouds</strong> so your app stays up when one fails.</p>
-      <div id="providers"></div>
-      <label class="check"><input id="remember" type="checkbox" checked> Remember these tokens on this computer (saved in <code>.env</code>, never uploaded)</label>
+      <div class="step-head"><span class="num">2</span><h2>Do you have a credit or debit card?</h2></div>
+      <p class="muted">It decides which free clouds you can use. Nothing here costs money.</p>
+      <div class="choices" role="radiogroup" aria-label="Do you have a card?">
+        <label class="choice"><input type="radio" name="card" value="no" checked>
+          <span><strong>No card</strong><br><span class="muted">Koyeb and Render, free without a card. Small servers (512 MB) that sleep when nobody visits; OmniMesh can keep them awake.</span></span></label>
+        <label class="choice"><input type="radio" name="card" value="yes">
+          <span><strong>Yes, I have a card</strong><br><span class="muted">Adds Oracle Always Free: an always-on Arm server with 2 CPUs and 12 GB RAM. Oracle asks for a card only to verify you and says it is not charged unless you upgrade your account. Needs a domain on Cloudflare.</span></span></label>
+      </div>
     </section>
 
     <section class="card step">
-      <div class="step-head"><span class="num">3</span><h2>Deploy</h2></div>
+      <div class="step-head"><span class="num">3</span><h2>Connect your clouds</h2><span class="pill" id="clouds-pill">all free</span></div>
+      <p class="muted">Create a free account on each one and paste an API token. Connect at least <strong>two hosting clouds</strong> so your app stays up when one fails.</p>
+      <div id="providers"></div>
+      <label class="check"><input id="remember" type="checkbox" checked> Remember these keys on this computer (saved in <code>.env</code> and <code>.omnimesh/</code>, never uploaded)</label>
+    </section>
+
+    <section class="card step">
+      <div class="step-head"><span class="num">4</span><h2>Keep it running</h2></div>
+      <label class="check top"><input id="keep-awake" type="checkbox" checked>
+        <span><strong>Keep my servers awake</strong><br><span class="muted">Free Koyeb servers sleep after 1 hour without visitors and Render after 15 minutes; the next visitor then waits while they wake. With this on, your router checks them every 5 minutes, which keeps them awake. On Render this uses about 744 of the 750 free hours a month your workspace gets.</span></span></label>
+      <label class="check top"><input id="watcher" type="checkbox">
+        <span><strong>Add the GitHub watcher</strong><br><span class="muted">A small GitHub Action in your repo checks your servers every 10 minutes and restarts any that stay down, through each cloud's API. If it cannot fix one, the run fails and GitHub emails you. It adds one commit to your repo and stores your cloud keys as encrypted GitHub secrets.</span></span></label>
+      <div id="github-box" class="provider" hidden>
+        <ol class="howto">
+          <li>Open GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token.</li>
+          <li>Repository access: <strong>Only select repositories</strong> → your backend repo.</li>
+          <li>Permissions: <strong>Contents</strong>, <strong>Workflows</strong> and <strong>Secrets</strong>, each "Read and write".</li>
+          <li>Generate it, copy the token and paste it here.</li>
+        </ol>
+        <label for="tok-github">GitHub token</label>
+        <input id="tok-github" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your GitHub fine-grained token">
+        <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">Create the token ↗</a>
+      </div>
+    </section>
+
+    <section class="card step">
+      <div class="step-head"><span class="num">5</span><h2>Deploy</h2></div>
       <div id="form-error" class="error" role="alert"></div>
       <button id="deploy" class="btn primary" type="submit">Deploy my backend</button>
-      <p class="hint">Takes about 3 to 10 minutes while each cloud builds your app. You can keep this page open and watch.</p>
+      <p class="hint">Takes about 3 to 10 minutes while each cloud builds your app (Oracle can take up to 15). You can keep this page open and watch.</p>
     </section>
   </form>
 

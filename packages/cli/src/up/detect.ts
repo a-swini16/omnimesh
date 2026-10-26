@@ -5,6 +5,8 @@ export interface RepoInfo {
   slug: string;
   url: string;
   branch: string;
+  /** Scheduled GitHub workflows run only on this branch */
+  defaultBranch: string;
   runtime: 'docker' | 'node' | 'python';
   buildCommand?: string;
   startCommand?: string;
@@ -32,9 +34,10 @@ export async function detectRepo(deps: Deps, input: string, overrides: { branch?
   });
   if (meta.private) throw new Error('GitHub: this repository is private. Make it public, or connect GitHub in each provider first.');
   const branch = overrides.branch || urlBranch || meta.default_branch || 'main';
+  if (!/^[\w./-]+$/.test(branch) || branch.includes('..')) throw new Error(`GitHub: "${branch}" is not a valid branch name.`);
   const files: Array<{ name: string }> = await callApi(deps, 'GitHub', `https://api.github.com/repos/${owner}/${repo}/contents?ref=${encodeURIComponent(branch)}`);
   const names = new Set(files.map((f) => f.name));
-  const base = { slug: `github.com/${owner}/${repo}`, url: `https://github.com/${owner}/${repo}`, branch };
+  const base = { slug: `github.com/${owner}/${repo}`, url: `https://github.com/${owner}/${repo}`, branch, defaultBranch: meta.default_branch || branch };
 
   if (names.has('Dockerfile')) return { ...base, runtime: 'docker' };
   if (names.has('package.json')) {
