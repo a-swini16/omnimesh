@@ -131,7 +131,7 @@ export async function startWizard(opts: UpOptions & { port?: number; deps?: (log
             oracle: Boolean(savedOracle(opts.cwd)),
             oracleHostname: env.ORACLE_HOSTNAME || null,
           },
-          settings: state ? { keepAwake: state.keepAwake !== false, watcher: Boolean(state.watcher) } : null,
+          settings: state ? { keepAwake: state.keepAwake !== false, watcher: Boolean(state.watcher), lock: state.lock !== false } : null,
         });
       }
       if (req.method === 'GET' && url.pathname === '/api/progress') {
@@ -161,6 +161,7 @@ export async function startWizard(opts: UpOptions & { port?: number; deps?: (log
         }
         const keepAwake = typeof body.keepAwake === 'boolean' ? body.keepAwake : previous?.keepAwake !== false;
         const watcher = typeof body.watcher === 'boolean' ? body.watcher : Boolean(previous?.watcher);
+        const lock = typeof body.lock === 'boolean' ? body.lock : previous?.lock !== false;
 
         if (body.remember) {
           writeDotEnv(opts.cwd, { [TOKEN_ENV.koyeb]: tokens.koyeb, [TOKEN_ENV.render]: tokens.render, [TOKEN_ENV.cloudflare]: tokens.cloudflare || undefined, [TOKEN_ENV.github]: tokens.github });
@@ -173,7 +174,7 @@ export async function startWizard(opts: UpOptions & { port?: number; deps?: (log
           if (job.log.length > 500) job.log.shift();
         };
         const deps = (opts.deps ?? realDeps)(log);
-        runUp(deps, { repoUrl: String(body.repoUrl || ''), branch: body.branch || undefined, startCommand: body.startCommand || undefined, tokens, oracle, keepAwake, watcher }, opts)
+        runUp(deps, { repoUrl: String(body.repoUrl || ''), branch: body.branch || undefined, startCommand: body.startCommand || undefined, tokens, oracle, keepAwake, watcher, lock }, opts)
           .then((result) => (job.result = result))
           .catch((e: Error) => {
             job.error = e.message;

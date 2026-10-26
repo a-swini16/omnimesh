@@ -10,3 +10,6 @@ coverage
 *.log
 .wrangler
 *.local
+.omnimesh/
+# Written by omnimesh up when you deploy from this folder
+/omnimesh.config.yaml

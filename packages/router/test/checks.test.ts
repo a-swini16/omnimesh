@@ -273,3 +273,62 @@ describe('Server checks, pause and resume', () => {
     expect(nodeState(undefined, check, Date.now() + 1000)).toBe('paused');
   });
 });
+
+describe('Staying signed in on a browser', () => {
+  const SECRET2 = 's3cr3t_gateway_token_min_32_characters_long_for_security';
+  const KEY = 'status-token-for-tests-0123456789abcdef';
+  const make = (statusToken = KEY) =>
+    createRouterApp({
+      config: validateOmniMeshConfig({ profile: 'no-card', domain: 'x.test', defaultPool: '/', pools: { '/': ['https://a.example', 'https://b.example'] } }),
+      gatewaySecret: SECRET2,
+      statusToken,
+    });
+  const signIn = (app: any, body: unknown, origin = 'https://x.test') =>
+    app.request(`${origin}/_omnimesh/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const cookieOf = (res: Response) => res.headers.get('set-cookie')!.split(';')[0];
+
+  it('swaps the key for a signed, HttpOnly cookie that only /_omnimesh receives', async () => {
+    const app = make();
+    expect((await signIn(app, { token: 'wrong' })).status).toBe(401);
+    const res = await signIn(app, { token: KEY, remember: true });
+    expect(res.status).toBe(200);
+    const set = res.headers.get('set-cookie')!;
+    expect(set).toMatch(/^omnimesh_session=\d+\.[0-9a-f]{64}; Path=\/_omnimesh; HttpOnly; SameSite=Strict; Secure; Max-Age=2592000$/);
+    expect(set).not.toContain(KEY); // the key itself never goes into the cookie
+    const status = await app.request('https://x.test/_omnimesh/status', { headers: { Cookie: cookieOf(res) } });
+    expect(status.status).toBe(200);
+    // Without "keep me signed in" the cookie ends with the browser session
+    expect((await signIn(app, { token: KEY, remember: false })).headers.get('set-cookie')).not.toContain('Max-Age');
+  });
+
+  it('rejects forged, expired and old-key sessions', async () => {
+    const app = make();
+    const cookie = cookieOf(await signIn(app, { token: KEY }));
+    const [exp, mac] = cookie.split('=')[1].split('.');
+    const ask = (c: string) => app.request('https://x.test/_omnimesh/status', { headers: { Cookie: c } }).then((r: Response) => r.status);
+    expect(await ask(`omnimesh_session=${Number(exp) + 1000}.${mac}`)).toBe(404); // longer life, same signature
+    expect(await ask(`omnimesh_session=${exp}.${'0'.repeat(64)}`)).toBe(404);
+    expect(await ask(`omnimesh_session=${Date.now() - 1000}.${mac}`)).toBe(404);
+    // A new sign-in key (omnimesh token --rotate) signs every browser out
+    expect((await make('another-status-token-0123456789abcdef').request('https://x.test/_omnimesh/status', { headers: { Cookie: cookie } })).status).toBe(404);
+  });
+
+  it('a signed-in browser can act only from the dashboard\'s own origin', async () => {
+    const app = make();
+    const cookie = cookieOf(await signIn(app, { token: KEY }));
+    const act = (origin?: string) =>
+      app.request('https://x.test/_omnimesh/actions/resume', {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) },
+        body: JSON.stringify({ pool: '/', node: 'node-1' }),
+      }).then((r: Response) => r.status);
+    expect(await act('https://x.test')).toBe(200);
+    expect(await act('https://evil.example')).toBe(404);
+    expect(await act()).toBe(404);
+  });
+
+  it('signing out clears the cookie', async () => {
+    const res = await make().request('https://x.test/_omnimesh/session', { method: 'DELETE' });
+    expect(res.headers.get('set-cookie')).toMatch(/^omnimesh_session=; Path=\/_omnimesh; .*Max-Age=0/);
+  });
+});

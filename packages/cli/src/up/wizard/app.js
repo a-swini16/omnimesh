@@ -153,19 +153,20 @@
         info.nodes.map((n) => el('div', { class: 'row' }, el('span', { class: 'dot' }), el('strong', { text: n.provider }), el('span', { class: 'muted', text: n.url })))
       ),
       el('h3', { text: 'Manage it' }),
-      el('p', { class: 'muted', text: 'Open the dashboard to watch traffic, failovers and free-tier usage. Sign in with your dashboard token:' }),
+      el('p', { class: 'muted', text: 'Open the dashboard to watch traffic, failovers and free-tier usage:' }),
+      el('div', { class: 'actions' },
+        el('a', { class: 'btn primary', href: info.statusToken ? `${info.dashboardUrl}#token=${info.statusToken}` : info.dashboardUrl, target: '_blank', rel: 'noopener noreferrer', text: 'Open dashboard' }),
+        el('button', { class: 'btn', type: 'button', text: 'Redeploy latest code', onclick: () => startDeploy({ repoUrl: info.repoUrl }) }),
+        el('button', { class: 'btn', type: 'button', text: 'Change settings', onclick: () => { $('done').hidden = true; $('form').hidden = false; } }),
+        fresh ? el('button', { class: 'btn', type: 'button', text: 'Show deploy log', onclick: () => { $('progress').hidden = !$('progress').hidden; } }) : null
+      ),
+      el('p', { class: 'muted small', text: 'Your dashboard sign-in key (saved in .env as OMNIMESH_STATUS_TOKEN):' }),
       el('div', { class: 'big-url' },
         el('code', { text: info.statusToken || 'see OMNIMESH_STATUS_TOKEN in .env' }),
         info.statusToken ? copyButton(info.statusToken, 'Copy token') : null
       ),
       info.warnings && info.warnings.length ? el('ul', { class: 'warn' }, info.warnings.map((w) => el('li', { text: w }))) : null,
       info.failed && info.failed.length ? el('ul', { class: 'warn' }, info.failed.map((f) => el('li', { text: f.error }))) : null,
-      el('div', { class: 'actions' },
-        el('a', { class: 'btn primary', href: info.dashboardUrl, target: '_blank', rel: 'noopener noreferrer', text: 'Open dashboard' }),
-        el('button', { class: 'btn', type: 'button', text: 'Redeploy latest code', onclick: () => startDeploy({ repoUrl: info.repoUrl }) }),
-        el('button', { class: 'btn', type: 'button', text: 'Change settings', onclick: () => { $('done').hidden = true; $('form').hidden = false; } }),
-        fresh ? el('button', { class: 'btn', type: 'button', text: 'Show deploy log', onclick: () => { $('progress').hidden = !$('progress').hidden; } }) : null
-      ),
     ];
     // replaceChildren() would print "null" for empty slots, so drop them first
     box.replaceChildren(...parts.filter(Boolean));
@@ -268,6 +269,7 @@
     $('watcher').addEventListener('change', () => ($('github-box').hidden = !$('watcher').checked));
     if (state.settings) {
       $('keep-awake').checked = state.settings.keepAwake !== false;
+      $('lock').checked = state.settings.lock !== false;
       $('watcher').checked = Boolean(state.settings.watcher);
       $('github-box').hidden = !$('watcher').checked;
     }
@@ -294,6 +296,7 @@
         tokens,
         oracle: hasCard ? oracle : null,
         keepAwake: $('keep-awake').checked,
+        lock: $('lock').checked,
         watcher,
         remember: $('remember').checked,
       });

@@ -26,6 +26,8 @@ export interface UpInput {
   keepAwake?: boolean;
   /** Add the GitHub watcher to the repo (needs tokens.github) */
   watcher?: boolean;
+  /** Lock every server so only the router gets in (the OmniMesh gate; Node.js apps). Default on. */
+  lock?: boolean;
 }
 
 export interface DeploymentState {
@@ -36,6 +38,7 @@ export interface DeploymentState {
   oracle?: { hostname: string; tunnelId: string };
   keepAwake?: boolean;
   watcher?: boolean;
+  lock?: boolean;
   updatedAt: string;
 }
 
@@ -161,13 +164,14 @@ export async function runUp(deps: Deps, input: UpInput, opts: UpOptions): Promis
     backends.map(async (provider) => {
       const existing = sameApp ? previous!.nodes.find((n) => n.provider === provider) : undefined;
       const env = { GATEWAY_SECRET: gatewaySecret, OMNIMESH_PROVIDER: provider };
+      const lock = input.lock !== false;
       if (provider === 'oracle') {
         const { hostname, creds } = input.oracle!;
         const tunnel = await ensureTunnel(deps, { token: input.tokens.cloudflare, accountId, name: `omnimesh-${appName}`, hostname, service: 'http://localhost:8000' }, cfApi);
         tunnelId = tunnel.tunnelId;
-        return deployOracle(deps, { creds, repo, name: appName, env, hostname, tunnelToken: tunnel.tunnelToken, existing }, opts.apis?.oracle);
+        return deployOracle(deps, { creds, repo, name: appName, env, hostname, tunnelToken: tunnel.tunnelToken, existing, lock }, opts.apis?.oracle);
       }
-      const job = { token: input.tokens[provider]!, repo, name: appName, env, existing };
+      const job = { token: input.tokens[provider]!, repo, name: appName, env, existing, lock };
       return provider === 'koyeb' ? deployKoyeb(deps, job, opts.apis?.koyeb ?? KOYEB_API) : deployRender(deps, job, opts.apis?.render ?? RENDER_API);
     })
   );
@@ -220,7 +224,14 @@ export async function runUp(deps: Deps, input: UpInput, opts: UpOptions): Promis
     warnings.push(`Automatic health checks are off: Cloudflare refused the schedule (${router.scheduleError}). Free accounts allow 5 scheduled Workers; the dashboard's "Check now" still works.`);
   }
   if (nodes.length === 1) warnings.push('Only one cloud is hosting your backend, so there is nothing to fail over to yet. Connect a second one.');
-  warnings.push('Your backend URLs on each cloud are still reachable directly. Add gatewayAuth() from @omnimesh/node to accept traffic only through the router.');
+  const open = nodes.filter((n) => !n.locked);
+  if (open.length) {
+    warnings.push(
+      input.lock === false
+        ? `Lock is off, so ${open.map((n) => n.provider).join(' and ')} can be called directly, skipping your router. Turn on "Lock my servers" and deploy again.`
+        : `Your app is a ${repo.runtime === 'docker' ? 'Docker' : 'Python'} app, so OmniMesh cannot lock it for you. Make it reject requests whose X-Gateway-Secret header is not your GATEWAY_SECRET (already set on every cloud); the dashboard's Checklist shows the code.`
+    );
+  }
   if (nodes.some((n) => n.provider === 'oracle')) {
     warnings.push('Oracle can stop Always Free servers that stay almost idle for 7 days (CPU, network and memory all under 20%). The watcher starts it again if that happens.');
   }
@@ -265,6 +276,7 @@ export async function runUp(deps: Deps, input: UpInput, opts: UpOptions): Promis
     ...(input.oracle && tunnelId ? { oracle: { hostname: input.oracle.hostname, tunnelId } } : {}),
     keepAwake: Boolean(input.keepAwake),
     watcher: Boolean(input.watcher),
+    lock: input.lock !== false,
     updatedAt: new Date().toISOString(),
   };
   fs.writeFileSync(path.join(opts.cwd, STATE_FILE), JSON.stringify(state, null, 2), { mode: 0o600 });

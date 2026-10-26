@@ -1,7 +1,7 @@
 import { CloudApiError, waitFor, type Deps } from './http.js';
 import { ociClient, ociList, type OciCredentials } from './oci.js';
 import type { RepoInfo } from './detect.js';
-import type { BackendDeployResult } from './koyeb.js';
+import { runSettings, type BackendDeployResult } from './koyeb.js';
 
 const PORT = 8000;
 const SHAPE = 'VM.Standard.A1.Flex';
@@ -20,12 +20,13 @@ export interface OracleDeployInput {
   hostname: string;
   tunnelToken: string;
   existing?: { serviceId: string; url: string; region?: string };
+  lock?: boolean;
 }
 
 const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /** Container recipe for repos without a Dockerfile, matching what Koyeb and Render run. */
-function dockerfileFor(repo: RepoInfo): string | null {
+function dockerfileFor(repo: RepoInfo, startCommand?: string): string | null {
   if (repo.runtime === 'docker') return null;
   const base = repo.runtime === 'node' ? 'node:22-bookworm-slim' : 'python:3.12-slim';
   return [
@@ -34,7 +35,7 @@ function dockerfileFor(repo: RepoInfo): string | null {
     'COPY . .',
     ...(repo.buildCommand ? [`RUN ${repo.buildCommand}`] : []),
     // Exec form with sh -c so $PORT is expanded at run time and the command is never re-parsed by us
-    `CMD ["sh", "-c", ${JSON.stringify(repo.startCommand ?? 'npm start')}]`,
+    `CMD ["sh", "-c", ${JSON.stringify(startCommand ?? repo.startCommand ?? 'npm start')}]`,
     '',
   ].join('\n');
 }
@@ -44,16 +45,18 @@ function dockerfileFor(repo: RepoInfo): string | null {
  * the app is reachable only through the tunnel (no inbound ports are open). A timer pulls your branch
  * every 5 minutes and rebuilds only when a new commit arrived, so pushing to GitHub updates this server.
  */
-export function oracleCloudInit(input: { repo: RepoInfo; env: Record<string, string>; tunnelToken: string }): string {
+export function oracleCloudInit(input: { repo: RepoInfo; env: Record<string, string>; tunnelToken: string; lock?: boolean }): string {
   const { repo } = input;
   if (!BRANCH.test(repo.branch)) throw new Error(`Oracle: "${repo.branch}" is not a branch name OmniMesh can use.`);
-  const env = Object.entries({ ...input.env, PORT: String(PORT) })
+  // The tunnel's public name reaches the app too, so it is locked like every other server
+  const run = runSettings(input);
+  const env = Object.entries({ ...input.env, ...run.env, PORT: String(PORT) })
     .map(([k, v]) => {
       if (!/^[A-Z_][A-Z0-9_]*$/.test(k) || /[\r\n]/.test(v)) throw new Error(`Oracle: environment variable ${k} cannot be passed to the server.`);
       return `${k}=${v}`;
     })
     .join('\n');
-  const dockerfile = dockerfileFor(repo);
+  const dockerfile = dockerfileFor(repo, run.startCommand);
   const build = dockerfile ? 'docker build -f /opt/omnimesh/Dockerfile.omnimesh -t omnimesh-app src' : 'docker build -t omnimesh-app src';
 
   return `#!/bin/bash
@@ -216,7 +219,8 @@ export async function deployOracle(deps: Deps, input: OracleDeployInput, apiBase
   if (!image) throw new Error(`Oracle: no Ubuntu image for Arm servers was found in ${region}.`);
 
   const ads = await oci<Array<{ name: string }>>('identity', 'GET', '/availabilityDomains', { ...at, query: { compartmentId: tenancy } });
-  const userData = Buffer.from(oracleCloudInit({ repo: input.repo, env: input.env, tunnelToken: input.tunnelToken })).toString('base64');
+  const userData = Buffer.from(oracleCloudInit({ repo: input.repo, env: input.env, tunnelToken: input.tunnelToken, lock: input.lock })).toString('base64');
+  const locked = runSettings(input).locked;
 
   deps.log(`Oracle: creating a free Arm server (${ocpus} OCPU, ${ocpus * GB_PER_OCPU} GB)`);
   let instanceId: string | undefined;
@@ -277,5 +281,5 @@ export async function deployOracle(deps: Deps, input: OracleDeployInput, apiBase
     }
   }, 15 * 60_000, 15_000);
   deps.log(ready ? `Oracle: live at ${url}` : 'Oracle: the server is still building. It joins your mesh by itself once it answers.');
-  return { provider: 'oracle', url, serviceId: instanceId, region, ...(ready ? {} : { pending: true }) };
+  return { provider: 'oracle', url, serviceId: instanceId, region, ...(ready ? {} : { pending: true }), ...(locked ? { locked: true } : {}) };
 }

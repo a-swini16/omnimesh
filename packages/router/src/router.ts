@@ -73,6 +73,8 @@ interface Candidate {
 const HARD_FAILURE_STATUSES = DOWN_STATUSES;
 // Methods whose app-level 5xx may be retried on another node
 const READ_METHODS = new Set(['GET', 'HEAD']);
+/** How long "Keep me signed in" lasts in a browser */
+export const SESSION_DAYS = 30;
 /** A pause is for testing failover or short maintenance, never a way to switch a server off for good */
 export const MAX_PAUSE_SECONDS = 300;
 /** A manual check makes up to 2 requests per server, so one router instance runs at most one per this window */
@@ -234,12 +236,51 @@ export function createRouterApp(options: RouterOptions) {
 
   const app = new Hono();
 
-  const isOperator = (authHeader: string | undefined) =>
+  const isBearer = (authHeader: string | undefined) =>
     Boolean(statusToken) && timingSafeEqual(authHeader || '', `Bearer ${statusToken}`);
+
+  // Browser sign-in: a signed, HttpOnly cookie, so the owner signs in once per browser instead of
+  // keeping the key at hand. Scripts cannot read it, it is only sent to /_omnimesh, and rotating the
+  // sign-in key (it is the signing key) signs every browser out.
+  let sessionKey: Promise<CryptoKey> | null = null;
+  const sign = async (exp: number) => {
+    sessionKey ??= crypto.subtle.importKey('raw', new TextEncoder().encode(`omnimesh-session:${statusToken}`), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const mac = await crypto.subtle.sign('HMAC', await sessionKey, new TextEncoder().encode(`v1.${exp}`));
+    return Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, '0')).join('');
+  };
+  const sessionCookie = (header: string | undefined) => header?.match(/(?:^|;\s*)omnimesh_session=([0-9]+)\.([0-9a-f]{64})/);
+  const hasSession = async (cookieHeader: string | undefined) => {
+    const m = sessionCookie(cookieHeader);
+    if (!statusToken || !m || Number(m[1]) < Date.now()) return false;
+    return timingSafeEqual(m[2], await sign(Number(m[1])));
+  };
+  /** Bearer key (CLI, watcher) or a signed browser session. Cookie-authenticated writes must also come from this origin. */
+  const isOperator = async (c: any, write = false) => {
+    if (isBearer(c.req.header('authorization'))) return true;
+    if (!(await hasSession(c.req.header('cookie')))) return false;
+    return !write || c.req.header('origin') === new URL(c.req.url).origin;
+  };
+
+  app.post('/_omnimesh/session', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!statusToken || typeof body?.token !== 'string' || !timingSafeEqual(body.token.trim(), statusToken)) {
+      return c.json({ error: 'That sign-in key is not right.' }, 401);
+    }
+    const remember = body.remember !== false;
+    const exp = Date.now() + (remember ? SESSION_DAYS * 86_400_000 : 12 * 3_600_000);
+    const secure = new URL(c.req.url).protocol === 'https:' ? '; Secure' : '';
+    c.header('Set-Cookie', `omnimesh_session=${exp}.${await sign(exp)}; Path=/_omnimesh; HttpOnly; SameSite=Strict${secure}${remember ? `; Max-Age=${SESSION_DAYS * 86_400}` : ''}`);
+    c.header('Cache-Control', 'no-store');
+    return c.json({ signedIn: true, until: new Date(exp).toISOString() });
+  });
+  app.delete('/_omnimesh/session', (c) => {
+    c.header('Set-Cookie', 'omnimesh_session=; Path=/_omnimesh; HttpOnly; SameSite=Strict; Max-Age=0');
+    return c.json({ signedIn: false });
+  });
 
   // Diagnostic endpoint: lists internal node URLs, so it is only served to operators holding the status token
   app.get('/_omnimesh/status', async (c) => {
-    if (!isOperator(c.req.header('authorization'))) {
+    if (!(await isOperator(c))) {
       return c.json({ error: 'Not Found' }, 404);
     }
     const health = await healthStore.getAllNodeHealth();
@@ -329,8 +370,8 @@ export function createRouterApp(options: RouterOptions) {
   });
 
   // Provider catalog for the dashboard: free-tier limits, card requirement, roles (static data)
-  app.get('/_omnimesh/catalog', (c) => {
-    if (!isOperator(c.req.header('authorization'))) return c.json({ error: 'Not Found' }, 404);
+  app.get('/_omnimesh/catalog', async (c) => {
+    if (!(await isOperator(c))) return c.json({ error: 'Not Found' }, 404);
     return c.json({
       providers: getAllProviders().map((p) => ({
         id: p.id,
@@ -360,7 +401,7 @@ export function createRouterApp(options: RouterOptions) {
   // Pause a server: no traffic is sent to it until the pause ends, except as a last resort when every
   // other server fails, so a pause can never take the app offline on its own
   app.post('/_omnimesh/actions/pause', async (c) => {
-    if (!isOperator(c.req.header('authorization'))) return c.json({ error: 'Not Found' }, 404);
+    if (!(await isOperator(c, true))) return c.json({ error: 'Not Found' }, 404);
     const body = await readAction(c);
     const node = findNode(body.pool, body.node);
     if (!node) return c.json({ error: 'Unknown server', code: 'ERR_UNKNOWN_NODE' }, 400);
@@ -399,7 +440,7 @@ export function createRouterApp(options: RouterOptions) {
   });
 
   app.post('/_omnimesh/actions/resume', async (c) => {
-    if (!isOperator(c.req.header('authorization'))) return c.json({ error: 'Not Found' }, 404);
+    if (!(await isOperator(c, true))) return c.json({ error: 'Not Found' }, 404);
     const body = await readAction(c);
     const node = findNode(body.pool, body.node);
     if (!node) return c.json({ error: 'Unknown server', code: 'ERR_UNKNOWN_NODE' }, 400);
@@ -417,7 +458,7 @@ export function createRouterApp(options: RouterOptions) {
   // GitHub watcher's check includes them only when keep-awake is on, so it never keeps them awake by itself
   let lastManualCheck = 0;
   app.post('/_omnimesh/actions/check', async (c) => {
-    if (!isOperator(c.req.header('authorization'))) return c.json({ error: 'Not Found' }, 404);
+    if (!(await isOperator(c, true))) return c.json({ error: 'Not Found' }, 404);
     const watcher = (await readAction(c)).source === 'watcher';
     const wait = lastManualCheck + (options.manualCheckCooldownMs ?? MANUAL_CHECK_COOLDOWN_MS) - Date.now();
     if (wait > 0) {

@@ -68,6 +68,10 @@ label { font-size: 12.5px; font-weight: 600; color: var(--muted); }
 .login-card input { font-family: var(--mono); margin-bottom: 4px; }
 .form-error { color: var(--bad); font-size: 12.5px; min-height: 18px; }
 .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0 !important; }
+.remember { display: flex; align-items: center; gap: 8px; font-weight: 550; color: var(--muted); margin: 2px 0 4px; }
+.find-key { margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+.find-key summary { cursor: pointer; font-weight: 600; color: var(--accent); padding: 4px 0; }
+.find-key ol { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 8px; }
 
 .brand-mark { width: 30px; height: 30px; border-radius: 9px; flex: none;
   background: conic-gradient(from 210deg, var(--accent), var(--ok), var(--accent)); box-shadow: inset 0 0 0 7px var(--surface), 0 0 0 1px var(--border); }

@@ -16,6 +16,8 @@ export interface MockCloudOptions {
   dnsTaken?: boolean;
   /** Base64 public key GitHub would hand out for encrypting secrets */
   githubPublicKey?: string;
+  /** Health check path set on the Render service */
+  renderHealthPath?: string;
 }
 
 const ADS = ['Uocm:US-ASHBURN-AD-1', 'Uocm:US-ASHBURN-AD-2', 'Uocm:US-ASHBURN-AD-3'];
@@ -47,6 +49,7 @@ export function mockCloud(opts: MockCloudOptions = {}) {
       if (method === 'POST' && p === '/v1/apps') return json({ app: { id: 'app1', domains: [{ name: 'om-shop-api-me.koyeb.app', type: 'AUTOASSIGNED' }] } });
       if (method === 'POST' && p === '/v1/services') return json({ service: { id: 'ksvc1', status: 'STARTING' } });
       if (method === 'POST' && p === '/v1/services/ksvc1/redeploy') return json({});
+      if (method === 'PUT' && p === '/v1/services/ksvc1') return json({ service: { id: 'ksvc1', status: 'STARTING' } });
       if (method === 'GET' && p === '/v1/services/ksvc1') return json({ service: { id: 'ksvc1', status: ++koyebPolls > 1 ? 'HEALTHY' : 'STARTING' } });
     }
     if (u.host === 'render.test') {
@@ -54,6 +57,9 @@ export function mockCloud(opts: MockCloudOptions = {}) {
       if (p === '/v1/owners') return json([{ owner: { id: 'own1' } }]);
       if (method === 'POST' && p === '/v1/services') return json({ service: { id: 'rsvc1', serviceDetails: { url: 'https://om-shop-api.onrender.com' } }, deployId: 'dep1' });
       if (method === 'POST' && p === '/v1/services/rsvc1/deploys') return json({ id: 'dep2' });
+      if (method === 'GET' && p === '/v1/services/rsvc1') return json({ id: 'rsvc1', serviceDetails: { healthCheckPath: opts.renderHealthPath ?? '' } });
+      if (method === 'PATCH' && p === '/v1/services/rsvc1') return json({ id: 'rsvc1' });
+      if (method === 'PUT' && p.startsWith('/v1/services/rsvc1/env-vars/')) return json({ key: decodeURIComponent(p.split('/').pop()!), value: body.value });
       if (method === 'GET' && p.startsWith('/v1/services/rsvc1/deploys/')) return json({ status: 'live' });
     }
     if (u.host === 'cloudflare.test') {

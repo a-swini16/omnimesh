@@ -15,12 +15,20 @@
   <form id="login-form" class="login-card" autocomplete="off">
     <div class="brand-mark" aria-hidden="true"></div>
     <h1>Sign in to your OmniMesh dashboard</h1>
-    <p class="muted">This page is for the owner of this API. Your sign-in key was shown when you deployed, and it is saved in your project's <code>.env</code> file as <code>OMNIMESH_STATUS_TOKEN</code>.</p>
+    <p class="muted">This page is for the owner of this app. Sign in once; this browser then remembers you.</p>
     <label for="token">Sign-in key</label>
     <input id="token" type="password" required spellcheck="false" autocomplete="off" placeholder="Paste your sign-in key">
+    <label class="remember"><input id="remember" type="checkbox" checked> Keep me signed in on this browser for 30 days</label>
     <div id="login-error" class="form-error" role="alert"></div>
     <button class="btn btn-primary btn-block" type="submit">Sign in</button>
-    <p class="hint">Lost it? In your project folder run <code>omnimesh open</code>. It opens this dashboard already signed in.</p>
+    <details class="find-key">
+      <summary>Where is my sign-in key?</summary>
+      <ol>
+        <li><strong>Easiest:</strong> on the computer you deployed from, open a terminal in your deployment folder (the one with the <code>.env</code> file) and run <code>omnimesh open</code>. The dashboard opens already signed in.</li>
+        <li>Or open the <code>.env</code> file in that folder and copy the value of <code>OMNIMESH_STATUS_TOKEN</code>.</li>
+        <li>Lost that folder too? In Cloudflare go to <strong>Workers &amp; Pages</strong> → your app (its name starts with <code>om-</code>) → <strong>Settings</strong> → <strong>Variables and Secrets</strong> → <strong>Add</strong>. Choose type <strong>Secret</strong>, name <code>OMNIMESH_STATUS_TOKEN</code>, paste a new random value of at least 32 characters, and press <strong>Deploy</strong>. Then sign in here with that value.</li>
+      </ol>
+    </details>
   </form>
 </div>
 

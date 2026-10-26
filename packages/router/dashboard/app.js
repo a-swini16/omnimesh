@@ -3,6 +3,7 @@
 (function () {
   'use strict';
 
+  // Older versions kept the key in browser storage; it is moved into the secure session and deleted
   const TOKEN_KEY = 'omnimesh.statusToken';
   const THEME_KEY = 'omnimesh.theme';
   const POLL_MS = 3000;
@@ -387,7 +388,7 @@
     const single = s.pools.filter((p) => p.nodes.length === 1);
     const sameCloud = s.pools.filter((p) => p.nodes.length > 1 && new Set(p.nodes.map((n) => n.providerId || n.url)).size === 1);
     if (single.length) {
-      list.push({ state: 'warn', title: 'Only one server for ' + listWords(single.map((p) => p.prefix)), detail: 'If it goes down, your app goes down: there is nothing to fail over to. Run omnimesh up in your project folder and connect a second cloud.' });
+      list.push({ state: 'warn', title: 'Only one server for ' + listWords(single.map((p) => p.prefix)), detail: 'If it goes down, your app goes down: there is nothing to fail over to. To fix it: on the computer you deployed from, open a terminal in your deployment folder (the one with the .env file), run omnimesh up, press Change settings, connect a second cloud (Koyeb without a card, Oracle with one) and press Deploy.' });
     } else if (sameCloud.length) {
       list.push({ state: 'warn', title: 'All servers for ' + listWords(sameCloud.map((p) => p.prefix)) + ' are on one cloud', detail: 'An outage at that cloud takes them all down. Connect another cloud with omnimesh up.' });
     } else {
@@ -397,7 +398,7 @@
     const open = nodes.filter((n) => n.lock === 'open');
     const lockUnknown = nodes.filter((n) => n.lock === 'unknown');
     if (open.length) {
-      list.push({ state: 'warn', title: listWords(open.map((n) => n.label)) + (open.length === 1 ? ' is' : ' are') + ' not locked', detail: 'Anyone who finds ' + (open.length === 1 ? 'its address' : 'their addresses') + ' (' + open.map((n) => hostOf(n.url)).join(', ') + ') can call your app directly and skip the router’s protection. Fix: add gatewayAuth() from @omnimesh/node to your app, then run omnimesh deploy.' });
+      list.push({ state: 'warn', title: listWords(open.map((n) => n.label)) + (open.length === 1 ? ' is' : ' are') + ' not locked', detail: 'Anyone who finds ' + (open.length === 1 ? 'its address' : 'their addresses') + ' (' + open.map((n) => hostOf(n.url)).join(', ') + ') can call your app directly and skip your router’s protection. To fix it (Node.js apps, no code changes): on the computer you deployed from, open a terminal in your deployment folder (the one with the .env file), run omnimesh up, keep “Lock my servers” ticked and press Redeploy latest code. Python or Docker apps: make the app refuse any request whose X-Gateway-Secret header is not equal to the GATEWAY_SECRET environment variable (OmniMesh already set it on every cloud).' });
     } else if (lockUnknown.length) {
       list.push({ state: 'idle', title: 'Servers locked to the router', detail: 'Not known yet for ' + listWords(lockUnknown.map((n) => n.label)) + '. The next health check finds out.' });
     } else {
@@ -911,7 +912,7 @@
                 h(
                   'div',
                   { class: 'card-body stack' },
-                  h('p', { class: 'muted', style: { margin: 0 }, text: 'Your sign-in key is kept in this browser tab only and is cleared when you sign out or close the tab. To change it, run omnimesh token --rotate in your project folder.' }),
+                  h('p', { class: 'muted', style: { margin: 0 }, text: 'You stay signed in on this browser for 30 days, or until you sign out. The key itself is never stored in the browser: it is swapped for a sign-in that page scripts cannot read. To change the key (which signs out every browser), run omnimesh token --rotate in your deployment folder.' }),
                   h('div', null, h('button', { class: 'btn', type: 'button', onclick: signOut }, icon('logout', 15), 'Sign out'))
                 )
               ),
@@ -1177,8 +1178,10 @@
   function apiPost(path, body) {
     return fetch(path, {
       method: 'POST',
-      headers: { Authorization: 'Bearer ' + state.token, 'Content-Type': 'application/json' },
+      // Signed in through the HttpOnly session cookie; the browser adds it, scripts never see it
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {}),
+      credentials: 'same-origin',
       cache: 'no-store',
     }).then((res) =>
       res.json().then(
@@ -1810,7 +1813,7 @@
   }
 
   function api(path) {
-    return fetch(path, { headers: { Authorization: 'Bearer ' + state.token }, cache: 'no-store' }).then((res) => {
+    return fetch(path, { credentials: 'same-origin', cache: 'no-store' }).then((res) => {
       if (res.status === 404 || res.status === 401) {
         const err = new Error('unauthorized');
         err.unauthorized = true;
@@ -1858,7 +1861,9 @@
       })
       .catch((err) => {
         if (err.unauthorized) {
-          signOut('That sign-in key was not accepted. Copy it again from OMNIMESH_STATUS_TOKEN in your .env, or run omnimesh open.');
+          // Never signed in on this browser, signed out, or the key was changed
+          showLogin(state.status ? 'You were signed out (the sign-in key may have been changed). Sign in again.' : '');
+          state.status = null;
           return;
         }
         state.failures += 1;
@@ -1882,9 +1887,21 @@
     $('token').focus();
   }
 
+  /** Exchange the key for a signed session cookie; the key itself is not kept anywhere in the browser. */
+  function signIn(key, remember) {
+    return fetch('/_omnimesh/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: key, remember }),
+      credentials: 'same-origin',
+      cache: 'no-store',
+    }).then((res) => res.ok);
+  }
+
   function signOut(message) {
+    fetch('/_omnimesh/session', { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
+    setItem('local', TOKEN_KEY, null);
     setItem('session', TOKEN_KEY, null);
-    state.token = null;
     state.status = null;
     state.catalog = null;
     state.builder = null;
@@ -1936,36 +1953,31 @@
     window.addEventListener('hashchange', onRoute);
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden && state.token) poll();
+      if (!document.hidden && state.status) poll();
     });
     $('login-form').addEventListener('submit', (e) => {
       e.preventDefault();
       const value = $('token').value.trim();
       if (!value) return;
-      state.token = value;
-      setItem('session', TOKEN_KEY, value);
       $('login-error').textContent = '';
       setLive('', 'Connecting…');
-      poll();
+      signIn(value, $('remember').checked).then(
+        (ok) => (ok ? poll() : showLogin('That sign-in key is not right. Check the steps below to find it.')),
+        () => showLogin('Could not reach your router. Check your internet connection and try again.')
+      );
     });
 
-    // `omnimesh open` and `omnimesh up` link here with #token=<key>: the fragment never reaches the
-    // server; keep it for this tab and remove it from the address bar and history straight away
+    // `omnimesh open` and the setup page link here with #token=<key>: the fragment never reaches the
+    // server. Trade it for a session at once, and take it out of the address bar and history.
     const linkToken = new URLSearchParams(location.hash.replace(/^#\/?/, '')).get('token');
-    if (linkToken) {
-      setItem('session', TOKEN_KEY, linkToken);
-      history.replaceState(null, '', location.pathname + '#/overview');
-    }
+    const oldToken = getItem('local', TOKEN_KEY) || getItem('session', TOKEN_KEY);
+    setItem('local', TOKEN_KEY, null);
+    setItem('session', TOKEN_KEY, null);
+    if (linkToken) history.replaceState(null, '', location.pathname + '#/overview');
 
     state.route = routeFromHash();
-    state.token = linkToken || getItem('session', TOKEN_KEY);
-    if (state.token) {
-      showShell();
-      renderPage();
-      poll();
-    } else {
-      showLogin('');
-    }
+    const key = linkToken || oldToken;
+    (key ? signIn(key, true).catch(() => false) : Promise.resolve(false)).then(() => poll());
   }
 
   init();

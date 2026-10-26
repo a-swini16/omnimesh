@@ -106,7 +106,9 @@ describe('live status API and dashboard', () => {
     // No hardcoded costs, fake metrics or random ids anywhere in what the owner sees
     expect(js).not.toMatch(/\$0\.00|Math\.random|demo|mock|simulat/i);
     const endpoints = [...new Set([...js.matchAll(/'(\/_omnimesh\/[a-z/-]+)'/g)].map((m) => m[1]))].sort();
-    expect(endpoints).toEqual(['/_omnimesh/actions/check', '/_omnimesh/actions/pause', '/_omnimesh/actions/resume', '/_omnimesh/catalog', '/_omnimesh/status']);
+    expect(endpoints).toEqual(['/_omnimesh/actions/check', '/_omnimesh/actions/pause', '/_omnimesh/actions/resume', '/_omnimesh/catalog', '/_omnimesh/session', '/_omnimesh/status']);
+    // The key is never kept in browser storage or sent as a header by the page
+    expect(js).not.toMatch(/setItem\([^)]*TOKEN_KEY, (value|linkToken|key)\)|Authorization: 'Bearer/);
   });
 
   it('catalog lists every provider with card requirement and limits, behind the token', async () => {

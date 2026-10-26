@@ -33,9 +33,14 @@ describe('omnimesh up: give us your backend, we host it', () => {
 
     const koyeb = calls.find((c) => c.url === 'https://koyeb.test/v1/services')!.body.definition;
     expect(koyeb.instance_types).toEqual([{ type: 'free' }]);
-    expect(koyeb.git).toMatchObject({ repository: 'github.com/me/shop-api', branch: 'main', buildpack: { build_command: 'npm install && npm run build', run_command: 'npm start' } });
+    // Locked by default: the gate runs the app's own start command behind it
+    const gated = `node -e "eval(Buffer.from(process.env.OMNIMESH_GATE,'base64').toString())" npm start`;
+    expect(koyeb.git).toMatchObject({ repository: 'github.com/me/shop-api', branch: 'main', buildpack: { build_command: 'npm install && npm run build', run_command: gated } });
+    expect(koyeb.env.map((e: any) => e.key)).toContain('OMNIMESH_GATE');
     const render = calls.find((c) => c.url === 'https://render.test/v1/services')!.body;
-    expect(render).toMatchObject({ type: 'web_service', repo: 'https://github.com/me/shop-api', serviceDetails: { plan: 'free', runtime: 'node' } });
+    expect(render).toMatchObject({ type: 'web_service', repo: 'https://github.com/me/shop-api', serviceDetails: { plan: 'free', runtime: 'node', envSpecificDetails: { startCommand: gated } } });
+    expect(result.nodes.every((n) => n.locked)).toBe(true);
+    expect(result.warnings.join(' ')).not.toMatch(/reachable directly|cannot lock/);
 
     const env = readDotEnv(dir);
     expect(env.GATEWAY_SECRET).toHaveLength(64);
@@ -66,10 +71,32 @@ describe('omnimesh up: give us your backend, we host it', () => {
     const second = mockCloud();
     const r2 = await runUp(second.deps, { repoUrl: 'me/shop-api', tokens: TOKENS }, { cwd: dir, apis: APIS, bundle: fakeBundle });
 
-    expect(second.calls.some((c) => c.url.endsWith('/v1/services/ksvc1/redeploy'))).toBe(true);
+    // Koyeb gets the full (locked) definition again; Render gets its start command and gate before deploying
+    expect(second.calls.find((c) => c.method === 'PUT' && c.url === 'https://koyeb.test/v1/services/ksvc1')!.body.definition.git.buildpack.run_command).toMatch(/^node -e "eval\(Buffer\.from\(process\.env\.OMNIMESH_GATE/);
+    const patch = second.calls.find((c) => c.method === 'PATCH' && c.url === 'https://render.test/v1/services/rsvc1')!;
+    expect(patch.body.serviceDetails.envSpecificDetails.startCommand).toMatch(/OMNIMESH_GATE.* npm start$/);
+    const envPuts = second.calls.filter((c) => c.method === 'PUT' && c.url.includes('/env-vars/')).map((c) => c.url.split('/').pop());
+    expect(envPuts).toEqual(['GATEWAY_SECRET', 'OMNIMESH_PROVIDER', 'OMNIMESH_GATE']);
+    expect(second.calls.findIndex((c) => c.method === 'PATCH')).toBeLessThan(second.calls.findIndex((c) => c.url.endsWith('/v1/services/rsvc1/deploys')));
     expect(second.calls.some((c) => c.method === 'POST' && c.url.endsWith('/v1/services/rsvc1/deploys'))).toBe(true);
     expect(second.calls.some((c) => c.method === 'POST' && (c.url === 'https://koyeb.test/v1/apps' || c.url === 'https://render.test/v1/services'))).toBe(false);
     expect(r2.statusToken).toBe(r1.statusToken);
+  });
+
+  it('with the lock off, servers run the plain start command and the owner is told', async () => {
+    const { deps, calls } = mockCloud();
+    const result = await runUp(deps, { repoUrl: 'me/shop-api', tokens: TOKENS, lock: false }, { cwd: dir, apis: APIS, bundle: fakeBundle });
+    expect(calls.find((c) => c.url === 'https://render.test/v1/services')!.body.serviceDetails.envSpecificDetails.startCommand).toBe('npm start');
+    expect(result.nodes.some((n) => n.locked)).toBe(false);
+    expect(result.warnings.join(' ')).toMatch(/Lock is off/);
+  });
+
+  it('keeps the cloud\'s own health check path open on a locked Render server', async () => {
+    await runUp(mockCloud().deps, { repoUrl: 'me/shop-api', tokens: TOKENS }, { cwd: dir, apis: APIS, bundle: fakeBundle });
+    const again = mockCloud({ renderHealthPath: '/healthz' });
+    await runUp(again.deps, { repoUrl: 'me/shop-api', tokens: TOKENS }, { cwd: dir, apis: APIS, bundle: fakeBundle });
+    const put = again.calls.find((c) => c.url.endsWith('/env-vars/OMNIMESH_GATE_PUBLIC_PATH'))!;
+    expect(put.body).toEqual({ value: '/healthz' });
   });
 
   it('keeps going when one cloud fails, and says so', async () => {
@@ -260,7 +287,7 @@ describe('omnimesh up wizard server is locked to this computer', () => {
     expect(readDotEnv(dir)).toMatchObject({ OCI_TENANCY: 'ocid1.tenancy.oc1..aaaatest', ORACLE_HOSTNAME: 'oracle.example.com' });
     const state = await (await fetch(`${base()}/api/state`, { headers: h })).json();
     expect(state.savedTokens).toMatchObject({ oracle: true, oracleHostname: 'oracle.example.com' });
-    expect(state.settings).toEqual({ keepAwake: false, watcher: false });
+    expect(state.settings).toEqual({ keepAwake: false, watcher: false, lock: true });
 
     // The "Redeploy latest code" button sends only the repo
     await fetch(`${base()}/api/deploy`, { method: 'POST', headers: h, body: JSON.stringify({ repoUrl: 'me/shop-api' }) });

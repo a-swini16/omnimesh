@@ -59,6 +59,8 @@
 
     <section class="card step">
       <div class="step-head"><span class="num">4</span><h2>Keep it running</h2></div>
+      <label class="check top"><input id="lock" type="checkbox" checked>
+        <span><strong>Lock my servers (recommended)</strong><br><span class="muted">Each cloud also gives your app its own public address (like your-app.onrender.com). With this on, those addresses answer "Forbidden" to everyone except your router, so nobody can skip its protection. No code changes: OmniMesh starts a small gatekeeper in front of your app. Works for Node.js apps; for Python or Docker apps the dashboard shows the few lines to add.</span></span></label>
       <label class="check top"><input id="keep-awake" type="checkbox" checked>
         <span><strong>Keep my servers awake</strong><br><span class="muted">Free Koyeb servers sleep after 1 hour without visitors and Render after 15 minutes; the next visitor then waits while they wake. With this on, your router checks them every 5 minutes, which keeps them awake. On Render this uses about 744 of the 750 free hours a month your workspace gets.</span></span></label>
       <label class="check top"><input id="watcher" type="checkbox">
