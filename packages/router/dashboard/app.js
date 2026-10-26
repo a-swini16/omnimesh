@@ -569,6 +569,7 @@
             h('span', { class: 'muted small', text: checksLine(s) })
           ),
           meshMap(s),
+          moreServersCard(s),
           s.pools.map((p) => [
             h('div', { class: 'section-title' }, h('h2', { class: 'mono', text: p.prefix }), h('span', { class: 'count', text: (p.prefix === '/' ? 'every request' : 'requests to ' + p.prefix + '…') + ' · ' + plural(p.nodes.length, 'server') + (p.isDefault ? ' · default route' : '') })),
             h('div', { class: 'server-grid' }, p.nodes.map((n) => serverCard(s, Object.assign({ pool: p.prefix }, n), { pool: p }))),
@@ -1047,6 +1048,28 @@
     );
   }
 
+  /** How to add servers: the dashboard never holds cloud keys, so it explains the steps on your computer. */
+  function moreServersCard(s) {
+    const used = new Set(uniqueByUrl(allNodes(s)).map((n) => n.providerId));
+    const ideas = [];
+    if (!used.has('oracle')) ideas.push('Oracle Always Free (with a card): an always-on server with 2 CPUs and 12 GB, about 20 times a free Koyeb or Render server. It can run all your services.');
+    if (!used.has('koyeb')) ideas.push('Koyeb (no card): one more free server for your main app.');
+    ideas.push('More Render servers: choose 2 or 3 "Servers per service on Render". They share the work; only one stays awake all month (Render\u2019s 750 free hours).');
+    ideas.push('A new service: “+ Add a service” puts another part of your app (for example /auth) on its own route with its own servers.');
+    return h(
+      'details',
+      { class: 'card card-body more-servers', style: { marginTop: '16px' } },
+      h('summary', null, h('strong', { text: 'Add more servers' }), h('span', { class: 'muted small', text: ' · ' + (s.routerConfig.strategy === 'weighted' ? 'your servers share the work' : 'one main server, the others are backups') })),
+      h('ol', { class: 'steps', style: { marginTop: '10px' } },
+        h('li', { text: 'On the computer you deployed from, open a terminal in your deployment folder (the one with the .env file) and run omnimesh up.' }),
+        h('li', { text: 'Press Change settings, then pick one:' }),
+        h('li', { text: 'Press Deploy. New servers show up here and start taking work by themselves.' })
+      ),
+      h('ul', { class: 'steps', style: { marginTop: '6px' } }, ideas.map((t) => h('li', { text: t }))),
+      h('p', { class: 'muted small', style: { margin: '8px 0 0' }, text: 'This dashboard runs on Cloudflare and never holds your cloud keys, so new servers are added from your computer.' })
+    );
+  }
+
   function appCard(s) {
     const a = s.app;
     if (!a) {
@@ -1069,6 +1092,7 @@
         kvList([
           ['Address', location.origin],
           ['Code', a.repo + ' (' + a.branch + ')'],
+          ...((a.services || []).length > 1 ? a.services.slice(1).map((x) => ['Service ' + x.route, x.repo.replace(/^github\.com\//, '') + (x.folder ? '/' + x.folder : '')]) : []),
           ['Kind', runtime],
           ['Last deployed', a.deployedAt ? new Date(a.deployedAt).toLocaleString() : 'unknown'],
         ]),

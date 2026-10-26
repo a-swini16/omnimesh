@@ -3,7 +3,8 @@ import path from 'node:path';
 import pc from 'picocolors';
 import { parseOmniMeshConfigYaml, isPlaceholderUrl, nodeHealthPath } from '@omnimesh/core';
 import { readEnvFile, placeholderNodes } from '../env.js';
-import { loadState, readDotEnv, runUp } from '../up/orchestrate.js';
+import { loadState, readDotEnv, runUp, servicesFromState } from '../up/orchestrate.js';
+import { savedOracle } from '../up/server.js';
 import { realDeps } from '../up/http.js';
 
 export interface DeployOptions {
@@ -28,7 +29,8 @@ async function redeploy(cwd: string, state: NonNullable<ReturnType<typeof loadSt
   console.log(pc.bold(pc.cyan(`\n🚀 Redeploying ${state.repo.url} (${state.repo.branch})\n`)));
   const env = readDotEnv(cwd);
   const tokens = { koyeb: env.KOYEB_API_TOKEN, render: env.RENDER_API_KEY, cloudflare: env.CLOUDFLARE_API_TOKEN || '' };
-  const missing = state.nodes.filter((n) => !tokens[n.provider as 'koyeb' | 'render']).map((n) => n.provider);
+  const oracle = state.nodes.some((n) => n.provider === 'oracle') ? savedOracle(cwd) ?? undefined : undefined;
+  const missing = [...new Set(state.nodes.filter((n) => (n.provider === 'oracle' ? !oracle : !tokens[n.provider as 'koyeb' | 'render'])).map((n) => n.provider))];
   if (!tokens.cloudflare) missing.push('cloudflare');
   if (missing.length) {
     console.log(pc.red(`✖ The API tokens for ${missing.join(', ')} are not saved in .env, so OmniMesh cannot redeploy there.`));
@@ -44,7 +46,16 @@ async function redeploy(cwd: string, state: NonNullable<ReturnType<typeof loadSt
   try {
     const result = await runUp(
       realDeps((m) => console.log(`  ${m}`)),
-      { repoUrl: state.repo.url, branch: state.repo.branch, startCommand: state.repo.runtime === 'python' ? state.repo.startCommand : undefined, tokens },
+      {
+        services: servicesFromState(cwd, state),
+        tokens,
+        oracle,
+        keepAwake: state.keepAwake,
+        lock: state.lock !== false,
+        spread: state.spread !== false,
+        renderCopies: state.renderCopies ?? 1,
+        watcher: state.watcher,
+      },
       { cwd }
     );
     for (const w of result.warnings) console.log(pc.yellow(`  ⚠ ${w}`));

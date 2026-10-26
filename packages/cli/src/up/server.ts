@@ -5,7 +5,8 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { timingSafeEqual } from '@omnimesh/core';
 import { realDeps, type Deps } from './http.js';
-import { runUp, loadState, readDotEnv, writeDotEnv, type UpInput, type UpOptions, type UpResult } from './orchestrate.js';
+import { runUp, loadState, readDotEnv, writeDotEnv, servicesFromState, stateServices, type ServiceInput, type UpInput, type UpOptions, type UpResult } from './orchestrate.js';
+import { loadAppSettings, parseAppSettings } from './settings.js';
 import { parseOciCredentials, type OciCredentials } from './oci.js';
 
 const WIZARD_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'wizard');
@@ -26,7 +27,7 @@ const TOKEN_ENV = { koyeb: 'KOYEB_API_TOKEN', render: 'RENDER_API_KEY', cloudfla
 const OCI_KEY_FILE = path.join('.omnimesh', 'oci_api_key.pem');
 
 /** Oracle credentials saved by an earlier run, or null. */
-function savedOracle(cwd: string): { creds: OciCredentials; hostname: string } | null {
+export function savedOracle(cwd: string): { creds: OciCredentials; hostname: string } | null {
   const env = readDotEnv(cwd);
   try {
     const pem = fs.readFileSync(path.join(cwd, OCI_KEY_FILE), 'utf-8');
@@ -126,12 +127,28 @@ export async function startWizard(opts: UpOptions & { port?: number; deps?: (log
                 updatedAt: state.updatedAt,
               }
             : null,
+          // Shown on the page so you can change them; this page is local to your computer and needs its key
+          services: state
+            ? (() => {
+                const settings = loadAppSettings(opts.cwd);
+                return stateServices(state).map((s) => ({
+                  route: s.route,
+                  repoUrl: s.repo.url,
+                  branch: s.repo.branch,
+                  folder: s.repo.folder ?? '',
+                  startCommand: s.repo.runtime === 'python' ? s.repo.startCommand ?? '' : '',
+                  settings: Object.entries(settings[s.route] ?? {}).map(([k, v]) => `${k}=${v}`).join('\n'),
+                }));
+              })()
+            : [],
           savedTokens: {
             ...Object.fromEntries(Object.entries(TOKEN_ENV).map(([p, k]) => [p, Boolean(env[k])])),
             oracle: Boolean(savedOracle(opts.cwd)),
             oracleHostname: env.ORACLE_HOSTNAME || null,
           },
-          settings: state ? { keepAwake: state.keepAwake !== false, watcher: Boolean(state.watcher), lock: state.lock !== false } : null,
+          settings: state
+            ? { keepAwake: state.keepAwake !== false, watcher: Boolean(state.watcher), lock: state.lock !== false, spread: state.spread !== false, renderCopies: state.renderCopies ?? 1 }
+            : null,
         });
       }
       if (req.method === 'GET' && url.pathname === '/api/progress') {
@@ -162,6 +179,25 @@ export async function startWizard(opts: UpOptions & { port?: number; deps?: (log
         const keepAwake = typeof body.keepAwake === 'boolean' ? body.keepAwake : previous?.keepAwake !== false;
         const watcher = typeof body.watcher === 'boolean' ? body.watcher : Boolean(previous?.watcher);
         const lock = typeof body.lock === 'boolean' ? body.lock : previous?.lock !== false;
+        const spread = typeof body.spread === 'boolean' ? body.spread : previous?.spread !== false;
+        const renderCopies = Number.isInteger(body.renderCopies) ? body.renderCopies : previous?.renderCopies ?? 1;
+
+        // Services from the page; "Redeploy latest code" sends none and redeploys what is saved
+        let services: ServiceInput[];
+        if (Array.isArray(body.services) && body.services.length) {
+          services = body.services.slice(0, 10).map((x: any, i: number) => ({
+            route: i === 0 ? '/' : String(x?.route ?? '').trim().toLowerCase(),
+            repoUrl: String(x?.repoUrl ?? '').trim(),
+            branch: String(x?.branch ?? '').trim() || undefined,
+            folder: String(x?.folder ?? '').trim() || undefined,
+            startCommand: String(x?.startCommand ?? '').trim() || undefined,
+            settings: parseAppSettings(String(x?.settings ?? ''), `Settings for ${i === 0 ? 'your main app' : String(x?.route ?? '')}`),
+          }));
+        } else if (previous && !body.repoUrl) {
+          services = servicesFromState(opts.cwd, previous);
+        } else {
+          services = [{ route: '/', repoUrl: String(body.repoUrl || ''), branch: body.branch || undefined, startCommand: body.startCommand || undefined, settings: loadAppSettings(opts.cwd)['/'] ?? {} }];
+        }
 
         if (body.remember) {
           writeDotEnv(opts.cwd, { [TOKEN_ENV.koyeb]: tokens.koyeb, [TOKEN_ENV.render]: tokens.render, [TOKEN_ENV.cloudflare]: tokens.cloudflare || undefined, [TOKEN_ENV.github]: tokens.github });
@@ -174,7 +210,7 @@ export async function startWizard(opts: UpOptions & { port?: number; deps?: (log
           if (job.log.length > 500) job.log.shift();
         };
         const deps = (opts.deps ?? realDeps)(log);
-        runUp(deps, { repoUrl: String(body.repoUrl || ''), branch: body.branch || undefined, startCommand: body.startCommand || undefined, tokens, oracle, keepAwake, watcher, lock }, opts)
+        runUp(deps, { services, tokens, oracle, keepAwake, watcher, lock, spread, renderCopies }, opts)
           .then((result) => (job.result = result))
           .catch((e: Error) => {
             job.error = e.message;

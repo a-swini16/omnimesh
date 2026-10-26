@@ -99,12 +99,75 @@ describe('omnimesh up: give us your backend, we host it', () => {
     expect(put.body).toEqual({ value: '/healthz' });
   });
 
+  it('splits the app into services on their own routes, spreads the work, and keeps Render inside its free hours', async () => {
+    const { deps, calls } = mockCloud();
+    const result = await runUp(
+      deps,
+      {
+        services: [
+          { route: '/', repoUrl: 'me/shop-api', settings: { OPENAI_API_KEY: 'sk-test', REDIS_URL: 'redis://x' } },
+          { route: '/auth', repoUrl: 'me/shop-api', folder: 'services/auth', settings: { JWT_ISSUER: 'shop' } },
+        ],
+        tokens: TOKENS,
+        keepAwake: true,
+        renderCopies: 2,
+      },
+      { cwd: dir, apis: APIS, bundle: fakeBundle }
+    );
+    // Koyeb: one free server per account, so only the main app; Render: 2 copies of each service
+    expect(result.services.map((s) => [s.route, s.nodes.map((n) => n.provider)])).toEqual([
+      ['/', ['koyeb', 'render', 'render']],
+      ['/auth', ['render', 'render']],
+    ]);
+    const renderCreates = calls.filter((c) => c.method === 'POST' && c.url === 'https://render.test/v1/services').map((c) => c.body);
+    expect(renderCreates.map((b) => b.name)).toEqual(['om-shop-api', 'om-shop-api-2', 'om-shop-api-auth', 'om-shop-api-auth-2']);
+    expect(renderCreates[2].rootDir).toBe('services/auth');
+    expect(renderCreates[0].envVars).toEqual(expect.arrayContaining([{ key: 'OPENAI_API_KEY', value: 'sk-test' }, { key: 'GATEWAY_SECRET', value: expect.any(String) }]));
+    expect(renderCreates[2].envVars.map((e: any) => e.key)).not.toContain('OPENAI_API_KEY'); // each service gets its own settings
+
+    const config = parseOmniMeshConfigYaml(fs.readFileSync(path.join(dir, 'omnimesh.config.yaml'), 'utf-8'));
+    expect(config.router.strategy).toBe('weighted');
+    expect(Object.keys(config.pools)).toEqual(['/', '/auth']);
+    const auth = config.pools['/auth'] as any[];
+    expect(auth.every((n) => n.healthPath === '/auth')).toBe(true);
+    // Only one Render server stays awake all month (750 free hours); Koyeb has no hour limit
+    const all = Object.values(config.pools).flat() as any[];
+    expect(all.filter((n) => n.providerId === 'render' && n.keepAwake === true)).toHaveLength(1);
+    expect(all.filter((n) => n.providerId === 'render' && n.keepAwake === false)).toHaveLength(3);
+    expect(result.warnings.join(' ')).toMatch(/only your main app's first Render server is kept awake/);
+    expect(result.warnings.join(' ')).toMatch(/Koyeb gives each account one free server/);
+
+    // Settings are saved privately for the next deploy, and the router knows the services
+    expect(JSON.parse(fs.readFileSync(path.join(dir, '.omnimesh', 'app-settings.json'), 'utf-8'))['/']).toEqual({ OPENAI_API_KEY: 'sk-test', REDIS_URL: 'redis://x' });
+    expect(fs.statSync(path.join(dir, '.omnimesh', 'app-settings.json')).mode & 0o077).toBe(0);
+    const upload = calls.find((c) => c.method === 'PUT' && c.url.endsWith('/workers/scripts/om-shop-api'))!.body;
+    const app = JSON.parse(upload.metadata.bindings.find((b: any) => b.name === 'OMNIMESH_APP').text);
+    expect(app.services.map((s: any) => [s.route, s.folder])).toEqual([['/', ''], ['/auth', 'services/auth']]);
+  });
+
+  it('removes a setting you deleted from the servers on the next deploy', async () => {
+    await runUp(mockCloud().deps, { services: [{ route: '/', repoUrl: 'me/shop-api', settings: { OLD_KEY: '1', KEEP: '2' } }], tokens: TOKENS }, { cwd: dir, apis: APIS, bundle: fakeBundle });
+    const again = mockCloud();
+    await runUp(again.deps, { services: [{ route: '/', repoUrl: 'me/shop-api', settings: { KEEP: '3' } }], tokens: TOKENS }, { cwd: dir, apis: APIS, bundle: fakeBundle });
+    expect(again.calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/env-vars/OLD_KEY'))).toBe(true);
+    expect(again.calls.find((c) => c.method === 'PUT' && c.url.endsWith('/env-vars/KEEP'))!.body).toEqual({ value: '3' });
+  });
+
+  it('refuses bad routes and settings in plain words', async () => {
+    const go = (services: any[]) => runUp(mockCloud().deps, { services, tokens: TOKENS }, { cwd: dir, apis: APIS, bundle: fakeBundle });
+    await expect(go([{ route: '/auth', repoUrl: 'me/shop-api' }])).rejects.toThrow(/first service is your main app/);
+    await expect(go([{ route: '/', repoUrl: 'me/shop-api' }, { route: '/Auth Service', repoUrl: 'me/shop-api' }])).rejects.toThrow(/not a route/);
+    await expect(go([{ route: '/', repoUrl: 'me/shop-api' }, { route: '/_omnimesh', repoUrl: 'me/shop-api' }])).rejects.toThrow(/not a route/);
+    await expect(go([{ route: '/', repoUrl: 'me/shop-api' }, { route: '/a', repoUrl: 'me/shop-api' }, { route: '/a', repoUrl: 'me/shop-api' }])).rejects.toThrow(/Two services use \/a/);
+    await expect(go([{ route: '/', repoUrl: 'me/shop-api', settings: { PORT: '1' } }])).rejects.toThrow(/PORT is set by OmniMesh/);
+  });
+
   it('keeps going when one cloud fails, and says so', async () => {
     const { deps } = mockCloud({ renderBroken: true });
     const result = await runUp(deps, { repoUrl: 'me/shop-api', tokens: TOKENS }, { cwd: dir, apis: APIS, bundle: fakeBundle });
     expect(result.nodes.map((n) => n.provider)).toEqual(['koyeb']);
     expect(result.failed[0].error).toMatch(/Render: unauthorized.*token/);
-    expect(result.warnings.join(' ')).toMatch(/Only one cloud/);
+    expect(result.warnings.join(' ')).toMatch(/Your app runs on one server only/);
   });
 
   it('with a card: Oracle first behind a tunnel, servers kept awake, and the GitHub watcher added', async () => {
@@ -259,7 +322,7 @@ describe('omnimesh up wizard server is locked to this computer', () => {
     }
     expect(job.error).toBeNull();
     expect(job.result.appUrl).toBe('https://om-shop-api.me.workers.dev');
-    expect(job.log.map((l: any) => l.text).join('\n')).toMatch(/Detected a Node\.js app/);
+    expect(job.log.map((l: any) => l.text).join('\n')).toMatch(/\/: a Node\.js app \(me\/shop-api, branch main\)/);
     const env = readDotEnv(dir);
     expect(env.KOYEB_API_TOKEN).toBe(TOKENS.koyeb);
     const state = await (await fetch(`${base()}/api/state`, { headers: h })).json();
@@ -287,7 +350,7 @@ describe('omnimesh up wizard server is locked to this computer', () => {
     expect(readDotEnv(dir)).toMatchObject({ OCI_TENANCY: 'ocid1.tenancy.oc1..aaaatest', ORACLE_HOSTNAME: 'oracle.example.com' });
     const state = await (await fetch(`${base()}/api/state`, { headers: h })).json();
     expect(state.savedTokens).toMatchObject({ oracle: true, oracleHostname: 'oracle.example.com' });
-    expect(state.settings).toEqual({ keepAwake: false, watcher: false, lock: true });
+    expect(state.settings).toEqual({ keepAwake: false, watcher: false, lock: true, spread: true, renderCopies: 1 });
 
     // The "Redeploy latest code" button sends only the repo
     await fetch(`${base()}/api/deploy`, { method: 'POST', headers: h, body: JSON.stringify({ repoUrl: 'me/shop-api' }) });

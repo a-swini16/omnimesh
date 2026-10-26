@@ -6,7 +6,7 @@ import { prepareBufferedRequest, fetchWithTimeout, BodyTooLargeError, DEFAULT_MA
 import { MemoryRateLimiter, type RateLimiter } from './rate-limiter.js';
 import { RouterTelemetry } from './telemetry.js';
 import { registerDashboard } from './dashboard.js';
-import { checkTargets, DOWN_STATUSES, MAX_CHECKED_NODES, recordDownServers, runChecks, SCHEDULE_CRON, type NodeCheck } from './checks.js';
+import { checkTargets, DOWN_STATUSES, MAX_CHECKED_NODES, nodeLabels, recordDownServers, runChecks, SCHEDULE_CRON, type NodeCheck } from './checks.js';
 import { getAllProviders } from '@omnimesh/providers';
 
 export interface RouterOptions {
@@ -34,6 +34,8 @@ export interface AppInfo {
   deployedAt: string;
   /** omnimesh up added the GitHub watcher to the repo */
   watcher: boolean;
+  /** Every service and the route it serves (the main app is "/") */
+  services: Array<{ route: string; repo: string; repoUrl: string; branch: string; folder: string }>;
 }
 
 /** Keep only the known fields, as short strings, so the dashboard never renders anything unexpected. */
@@ -42,9 +44,16 @@ export function parseAppInfo(raw: string | undefined): AppInfo | null {
   try {
     const v = JSON.parse(raw);
     const str = (x: unknown) => (typeof x === 'string' ? x.slice(0, 200) : '');
-    const info = { repo: str(v.repo), repoUrl: str(v.repoUrl), branch: str(v.branch), runtime: str(v.runtime), deployedAt: str(v.deployedAt), watcher: v.watcher === true };
+    const github = (u: unknown) => (/^https:\/\/github\.com\//.test(str(u)) ? str(u) : '');
+    const services = (Array.isArray(v.services) ? v.services : []).slice(0, 20).map((x: any) => ({
+      route: /^\/[\w./-]*$/.test(str(x?.route)) ? str(x.route) : '/',
+      repo: str(x?.repo),
+      repoUrl: github(x?.repoUrl),
+      branch: str(x?.branch),
+      folder: str(x?.folder),
+    }));
+    const info = { repo: str(v.repo), repoUrl: github(v.repoUrl), branch: str(v.branch), runtime: str(v.runtime), deployedAt: str(v.deployedAt), watcher: v.watcher === true, services };
     if (!info.repo) return null;
-    if (!/^https:\/\/github\.com\//.test(info.repoUrl)) info.repoUrl = '';
     return info;
   } catch {
     return null;
@@ -187,6 +196,7 @@ export function createRouterApp(options: RouterOptions) {
   // Resolve pools once and refuse to send the gateway secret over plain HTTP to a remote host
   const pools: Record<string, Candidate[]> = {};
   for (const [prefix, nodes] of Object.entries(config.pools)) {
+    const labels = nodeLabels(nodes);
     pools[prefix] = nodes.map((n, i) => {
       const url = typeof n === 'string' ? n : n.url;
       const providerId = typeof n === 'string' ? undefined : n.providerId;
@@ -213,7 +223,7 @@ export function createRouterApp(options: RouterOptions) {
         isBackup,
         quota,
         quotaKey: providerId || url,
-        label: providerId || `node-${i + 1}`,
+        label: labels[i],
       };
     });
   }
@@ -314,6 +324,8 @@ export function createRouterApp(options: RouterOptions) {
               check: check ?? null,
               lock: check?.lock ?? 'unknown',
               sleepsIfIdle: targetsByUrl.get(n.url)?.sleepsIfIdle ?? false,
+              // Whether the 5-minute check keeps this server awake (always true for servers that never sleep)
+              keptAwake: !(targetsByUrl.get(n.url)?.sleepsIfIdle) || (targetsByUrl.get(n.url)?.keepAwake ?? config.keepAlive.enabled),
               healthPath: targetsByUrl.get(n.url)?.healthPath ?? null,
               // Only the first MAX_CHECKED_NODES servers fit in one Cloudflare run
               checkable: targets.findIndex((t) => t.url === n.url) < MAX_CHECKED_NODES,

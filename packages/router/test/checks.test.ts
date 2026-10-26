@@ -305,7 +305,7 @@ describe('Staying signed in on a browser', () => {
     const app = make();
     const cookie = cookieOf(await signIn(app, { token: KEY }));
     const [exp, mac] = cookie.split('=')[1].split('.');
-    const ask = (c: string) => app.request('https://x.test/_omnimesh/status', { headers: { Cookie: c } }).then((r: Response) => r.status);
+    const ask = async (c: string) => (await app.request('https://x.test/_omnimesh/status', { headers: { Cookie: c } })).status;
     expect(await ask(`omnimesh_session=${Number(exp) + 1000}.${mac}`)).toBe(404); // longer life, same signature
     expect(await ask(`omnimesh_session=${exp}.${'0'.repeat(64)}`)).toBe(404);
     expect(await ask(`omnimesh_session=${Date.now() - 1000}.${mac}`)).toBe(404);
@@ -317,11 +317,11 @@ describe('Staying signed in on a browser', () => {
     const app = make();
     const cookie = cookieOf(await signIn(app, { token: KEY }));
     const act = (origin?: string) =>
-      app.request('https://x.test/_omnimesh/actions/resume', {
+      Promise.resolve(app.request('https://x.test/_omnimesh/actions/resume', {
         method: 'POST',
         headers: { Cookie: cookie, 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) },
         body: JSON.stringify({ pool: '/', node: 'node-1' }),
-      }).then((r: Response) => r.status);
+      })).then((r: Response) => r.status);
     expect(await act('https://x.test')).toBe(200);
     expect(await act('https://evil.example')).toBe(404);
     expect(await act()).toBe(404);

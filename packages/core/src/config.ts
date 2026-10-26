@@ -33,6 +33,10 @@ export const CandidateNodeSchema = z.union([
     // Path the router and CLI use to check this server. Any answer below 500 counts as online,
     // so a backend without a health route still works (a 404 proves it is running).
     healthPath: z.string().regex(/^\/[^\s]*$/, 'healthPath must start with "/"').optional(),
+    // Name shown in the dashboard and used by pause/resume (default: providerId, then node-N)
+    label: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, 'label must be lowercase letters, digits and dashes').optional(),
+    // Check this server every 5 minutes even if its free tier sleeps when idle (overrides keepAlive.enabled)
+    keepAwake: z.boolean().optional(),
     // Free-tier request quota for this provider account; the router moves traffic away at 95%
     requestsPerDay: z.number().int().positive().optional(),
     requestsPerMonth: z.number().int().positive().optional(),

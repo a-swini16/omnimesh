@@ -30,6 +30,12 @@
       <label for="repo">GitHub repository link</label>
       <input id="repo" placeholder="https://github.com/you/your-backend" required autocomplete="off" spellcheck="false">
       <p class="hint">The repo must be <strong>public</strong>, and your app must listen on the <code>PORT</code> environment variable (for example <code>app.listen(process.env.PORT)</code>). OmniMesh detects Node.js, Python and Docker by itself.</p>
+      <label for="settings-main">App settings (optional)</label>
+      <textarea id="settings-main" spellcheck="false" placeholder="OPENAI_API_KEY=sk-...&#10;REDIS_URL=redis://...&#10;(one NAME=value per line, like a .env file)"></textarea>
+      <p class="hint">Your app's own environment variables, set on every cloud. Saved only on this computer (<code>.omnimesh/</code>).</p>
+      <div id="services"></div>
+      <button id="add-service" class="btn" type="button">+ Add a service (microservice)</button>
+      <p class="hint">A service is another part of your app on its own route, for example <code>/auth</code>, from its own repo or a folder of this one. It gets its own servers; your visitors still use one URL. Each service receives the full path (for example <code>/auth/login</code>).</p>
       <details>
         <summary>Advanced (optional)</summary>
         <div class="grid">
@@ -54,6 +60,9 @@
       <div class="step-head"><span class="num">3</span><h2>Connect your clouds</h2><span class="pill" id="clouds-pill">all free</span></div>
       <p class="muted">Create a free account on each one and paste an API token. Connect at least <strong>two hosting clouds</strong> so your app stays up when one fails.</p>
       <div id="providers"></div>
+      <label for="render-copies">Servers per service on Render</label>
+      <select id="render-copies"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+      <p class="hint">More servers on Render share the work. Render gives your workspace 750 free hours a month, so only one Render server is kept awake; the others sleep when idle and wake on the next visit.</p>
       <label class="check"><input id="remember" type="checkbox" checked> Remember these keys on this computer (saved in <code>.env</code> and <code>.omnimesh/</code>, never uploaded)</label>
     </section>
 
@@ -61,6 +70,8 @@
       <div class="step-head"><span class="num">4</span><h2>Keep it running</h2></div>
       <label class="check top"><input id="lock" type="checkbox" checked>
         <span><strong>Lock my servers (recommended)</strong><br><span class="muted">Each cloud also gives your app its own public address (like your-app.onrender.com). With this on, those addresses answer "Forbidden" to everyone except your router, so nobody can skip its protection. No code changes: OmniMesh starts a small gatekeeper in front of your app. Works for Node.js apps; for Python or Docker apps the dashboard shows the few lines to add.</span></span></label>
+      <label class="check top"><input id="spread" type="checkbox" checked>
+        <span><strong>Spread the work across all servers</strong><br><span class="muted">Every server takes part of the traffic (Oracle gets 4 shares, the free servers 1 each). Turn off to use one main server, with the others waiting as backups.</span></span></label>
       <label class="check top"><input id="keep-awake" type="checkbox" checked>
         <span><strong>Keep my servers awake</strong><br><span class="muted">Free Koyeb servers sleep after 1 hour without visitors and Render after 15 minutes; the next visitor then waits while they wake. With this on, your router checks them every 5 minutes, which keeps them awake. On Render this uses about 744 of the 750 free hours a month your workspace gets.</span></span></label>
       <label class="check top"><input id="watcher" type="checkbox">

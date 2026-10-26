@@ -65,4 +65,7 @@ textarea { width: 100%; font: 12.5px/1.5 ui-monospace, Menlo, Consolas, monospac
 textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
 .badge.card { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
 .file-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 6px; font-size: 13px; color: var(--muted); }
+.service-row { border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-top: 10px; background: var(--card2); display: grid; gap: 4px; }
+.service-row .row-head { display: flex; justify-content: space-between; align-items: center; }
+select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; }
 @media (max-width: 640px) { .choices { grid-template-columns: 1fr; } }

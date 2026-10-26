@@ -8,6 +8,8 @@ export interface RepoInfo {
   /** Scheduled GitHub workflows run only on this branch */
   defaultBranch: string;
   runtime: 'docker' | 'node' | 'python';
+  /** Sub-folder of the repo that holds this service (monorepos); empty means the repo root */
+  folder?: string;
   buildCommand?: string;
   startCommand?: string;
 }
@@ -26,7 +28,12 @@ export function parseGithubUrl(input: string): { owner: string; repo: string; br
  * Look at a public GitHub repo and decide how to build it: a Dockerfile wins, then Node
  * (package.json), then Python (requirements.txt / pyproject.toml).
  */
-export async function detectRepo(deps: Deps, input: string, overrides: { branch?: string; startCommand?: string } = {}): Promise<RepoInfo> {
+export async function detectRepo(deps: Deps, input: string, overrides: { branch?: string; startCommand?: string; folder?: string } = {}): Promise<RepoInfo> {
+  const folder = (overrides.folder ?? '').trim().replace(/^\/+|\/+$/g, '');
+  if (folder && (!/^[\w.-]+(\/[\w.-]+)*$/.test(folder) || folder.split('/').some((p) => p === '..' || p === '.'))) {
+    throw new Error(`GitHub: "${overrides.folder}" is not a folder name OmniMesh can use (for example services/auth).`);
+  }
+  const at = folder ? `/${folder.split('/').map(encodeURIComponent).join('/')}` : '';
   const { owner, repo, branch: urlBranch } = parseGithubUrl(input);
   const meta = await callApi(deps, 'GitHub', `https://api.github.com/repos/${owner}/${repo}`).catch((e) => {
     if (e.status === 404) throw new Error(`GitHub: ${owner}/${repo} was not found. The repository must exist and be public.`);
@@ -35,13 +42,17 @@ export async function detectRepo(deps: Deps, input: string, overrides: { branch?
   if (meta.private) throw new Error('GitHub: this repository is private. Make it public, or connect GitHub in each provider first.');
   const branch = overrides.branch || urlBranch || meta.default_branch || 'main';
   if (!/^[\w./-]+$/.test(branch) || branch.includes('..')) throw new Error(`GitHub: "${branch}" is not a valid branch name.`);
-  const files: Array<{ name: string }> = await callApi(deps, 'GitHub', `https://api.github.com/repos/${owner}/${repo}/contents?ref=${encodeURIComponent(branch)}`);
+  const files: Array<{ name: string }> = await callApi(deps, 'GitHub', `https://api.github.com/repos/${owner}/${repo}/contents${at}?ref=${encodeURIComponent(branch)}`).catch((e) => {
+    if (folder && e.status === 404) throw new Error(`GitHub: the folder "${folder}" was not found on branch ${branch}.`);
+    throw e;
+  });
+  if (!Array.isArray(files)) throw new Error(`GitHub: "${folder}" is a file, not a folder.`);
   const names = new Set(files.map((f) => f.name));
-  const base = { slug: `github.com/${owner}/${repo}`, url: `https://github.com/${owner}/${repo}`, branch, defaultBranch: meta.default_branch || branch };
+  const base = { slug: `github.com/${owner}/${repo}`, url: `https://github.com/${owner}/${repo}`, branch, defaultBranch: meta.default_branch || branch, ...(folder ? { folder } : {}) };
 
   if (names.has('Dockerfile')) return { ...base, runtime: 'docker' };
   if (names.has('package.json')) {
-    const pkgFile = await callApi(deps, 'GitHub', `https://api.github.com/repos/${owner}/${repo}/contents/package.json?ref=${encodeURIComponent(branch)}`);
+    const pkgFile = await callApi(deps, 'GitHub', `https://api.github.com/repos/${owner}/${repo}/contents${at}/package.json?ref=${encodeURIComponent(branch)}`);
     let scripts: Record<string, string> = {};
     try {
       scripts = JSON.parse(Buffer.from(pkgFile.content, 'base64').toString('utf-8')).scripts || {};

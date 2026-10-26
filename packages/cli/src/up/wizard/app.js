@@ -59,6 +59,34 @@
   ];
   let hasCard = false;
 
+  /** One extra service: route, repo (blank means the main repo), folder and its own settings. */
+  function addServiceRow(v) {
+    v = v || {};
+    const row = el('div', { class: 'service-row' },
+      el('div', { class: 'row-head' }, el('strong', { text: 'Service' }), el('button', { class: 'btn', type: 'button', text: 'Remove', onclick: () => row.remove() })),
+      el('label', { text: 'Route (where it lives in your URL)' }),
+      el('input', { class: 'svc-route', placeholder: '/auth', value: v.route || '', autocomplete: 'off', spellcheck: false }),
+      el('label', { text: 'GitHub repository (leave empty to use the main one)' }),
+      el('input', { class: 'svc-repo', placeholder: 'https://github.com/you/auth-service', value: v.repoUrl || '', autocomplete: 'off', spellcheck: false }),
+      el('label', { text: 'Folder in the repo (optional, for monorepos)' }),
+      el('input', { class: 'svc-folder', placeholder: 'services/auth', value: v.folder || '', autocomplete: 'off', spellcheck: false }),
+      el('label', { text: 'Its settings (optional)' }),
+      el('textarea', { class: 'svc-settings', spellcheck: false, placeholder: 'NAME=value', value: v.settings || '' })
+    );
+    $('services').append(row);
+  }
+
+  function readServices() {
+    const main = { route: '/', repoUrl: $('repo').value.trim(), branch: $('branch').value.trim(), startCommand: $('start').value.trim(), settings: $('settings-main').value };
+    const extra = [...document.querySelectorAll('.service-row')].map((r) => ({
+      route: r.querySelector('.svc-route').value.trim().toLowerCase(),
+      repoUrl: r.querySelector('.svc-repo').value.trim() || main.repoUrl,
+      folder: r.querySelector('.svc-folder').value.trim(),
+      settings: r.querySelector('.svc-settings').value,
+    }));
+    return [main].concat(extra);
+  }
+
   const $ = (id) => document.getElementById(id);
   function el(tag, props, ...kids) {
     const e = document.createElement(tag);
@@ -267,7 +295,14 @@
       });
     }
     $('watcher').addEventListener('change', () => ($('github-box').hidden = !$('watcher').checked));
+    $('add-service').addEventListener('click', () => addServiceRow());
+    (state.services || []).forEach((s, i) => {
+      if (i === 0) $('settings-main').value = s.settings || '';
+      else addServiceRow(s);
+    });
     if (state.settings) {
+      $('spread').checked = state.settings.spread !== false;
+      $('render-copies').value = String(state.settings.renderCopies || 1);
       $('keep-awake').checked = state.settings.keepAwake !== false;
       $('lock').checked = state.settings.lock !== false;
       $('watcher').checked = Boolean(state.settings.watcher);
@@ -289,10 +324,13 @@
       const oracle = hasCard ? { config: $('oci-config').value.trim(), privateKey: $('oci-key').value.trim(), hostname: $('oci-host').value.trim().toLowerCase() } : null;
       const problem = checkForm($('repo').value.trim(), tokens, oracle, watcher);
       if (problem) return showError(problem[0], problem[1]);
+      const services = readServices();
+      const bad = services.slice(1).find((s) => !/^\/[a-z0-9][a-z0-9/-]*$/.test(s.route));
+      if (bad) return showError('Each service needs a route like /auth (lowercase letters, digits and dashes).', null);
       startDeploy({
-        repoUrl: $('repo').value.trim(),
-        branch: $('branch').value.trim(),
-        startCommand: $('start').value.trim(),
+        services,
+        spread: $('spread').checked,
+        renderCopies: Number($('render-copies').value),
         tokens,
         oracle: hasCard ? oracle : null,
         keepAwake: $('keep-awake').checked,

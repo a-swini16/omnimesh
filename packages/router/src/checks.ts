@@ -42,6 +42,22 @@ export interface CheckTarget {
   healthPath: string;
   /** Free servers that sleep when idle: checking them on a timer would keep them awake */
   sleepsIfIdle: boolean;
+  /** Set per server: check (and so keep awake) on the schedule or not, whatever keepAlive says */
+  keepAwake?: boolean;
+}
+
+/**
+ * The name of every server in a route: its label, else its cloud, else node-N. Copies on the same cloud
+ * get -2, -3, so pause, resume and the dashboard can tell them apart.
+ */
+export function nodeLabels(nodes: Array<string | { label?: string; providerId?: string }>): string[] {
+  const used = new Map<string, number>();
+  return nodes.map((n, i) => {
+    const base = (typeof n === 'string' ? undefined : n.label ?? n.providerId) || `node-${i + 1}`;
+    const count = (used.get(base) ?? 0) + 1;
+    used.set(base, count);
+    return count === 1 ? base : `${base}-${count}`;
+  });
 }
 
 /**
@@ -64,17 +80,19 @@ export const LOCK_PROBE_PATH = '/.well-known/omnimesh-lock-check';
 export function checkTargets(config: OmniMeshConfig): CheckTarget[] {
   const seen = new Map<string, CheckTarget>();
   for (const [pool, nodes] of Object.entries(config.pools)) {
+    const labels = nodeLabels(nodes);
     nodes.forEach((n, i) => {
       const url = (typeof n === 'string' ? n : n.url).replace(/\/$/, '');
       if (seen.has(url) || isPlaceholderUrl(url)) return;
       const providerId = typeof n === 'string' ? undefined : n.providerId;
+      const keepAwake = typeof n === 'string' ? undefined : n.keepAwake;
       seen.set(url, {
         url,
         pool,
-        // Same labels as the router uses
-        label: providerId || `node-${i + 1}`,
+        label: labels[i],
         healthPath: nodeHealthPath(n),
         sleepsIfIdle: Boolean(providerId && getProvider(providerId)?.limits.sleepsIfIdle),
+        ...(keepAwake === undefined ? {} : { keepAwake }),
       });
     });
   }
@@ -154,7 +172,7 @@ export async function runChecks(options: RunChecksOptions): Promise<{ snapshot: 
   // A manual check waits long enough for a sleeping free server to wake (Render takes about a minute)
   const timeoutMs = options.timeoutMs ?? (trigger === 'schedule' ? 10_000 : 60_000);
   // Cloudflare free Workers allow 50 outgoing requests per run, so at most MAX_CHECKED_NODES servers are asked
-  const due = targets.filter((t) => trigger === 'manual' || options.includeSleepers || !t.sleepsIfIdle).slice(0, MAX_CHECKED_NODES);
+  const due = targets.filter((t) => trigger === 'manual' || !t.sleepsIfIdle || (t.keepAwake ?? options.includeSleepers)).slice(0, MAX_CHECKED_NODES);
   const results = await Promise.all(
     due.map(async (t) => {
       const result = await checkNode(t, gatewaySecret, timeoutMs);

@@ -14,7 +14,14 @@ export interface BackendDeployInput {
   existing?: { serviceId: string; url: string };
   /** Put the OmniMesh gate in front of the app so only the router can reach it (Node.js apps) */
   lock?: boolean;
+  /** Settings removed since the last deploy, to delete from an existing service */
+  removeEnv?: string[];
+  /** Which service and copy this is, for the log ("auth", "copy 2") */
+  tag?: string;
 }
+
+/** "Koyeb" or "Render · auth" in the deploy log */
+export const who = (cloud: string, tag?: string) => (tag ? `${cloud} · ${tag}` : cloud);
 
 export interface BackendDeployResult {
   provider: string;
@@ -45,7 +52,7 @@ export async function deployKoyeb(deps: Deps, input: BackendDeployInput, apiBase
   let url: string;
   const { repo } = input;
   const run = runSettings(input);
-  const git: Record<string, unknown> = { repository: repo.slug, branch: repo.branch };
+  const git: Record<string, unknown> = { repository: repo.slug, branch: repo.branch, ...(repo.folder ? { workdir: repo.folder } : {}) };
   if (repo.runtime === 'docker') git.docker = {};
   else git.buildpack = { build_command: repo.buildCommand, run_command: run.startCommand };
   const definition = {
@@ -62,14 +69,14 @@ export async function deployKoyeb(deps: Deps, input: BackendDeployInput, apiBase
 
   if (input.existing) {
     // Sending the full definition applies setting changes (like the lock) and deploys the latest commit
-    deps.log('Koyeb: updating the service and deploying the latest commit');
+    deps.log(`${who('Koyeb', input.tag)}: updating the service and deploying the latest commit`);
     await callApi(deps, 'Koyeb', `${apiBase}/v1/services/${input.existing.serviceId}`, { method: 'PUT', headers: auth, json: { definition } });
     serviceId = input.existing.serviceId;
     url = input.existing.url;
   } else {
-    deps.log('Koyeb: creating the app');
+    deps.log(`${who('Koyeb', input.tag)}: creating the app`);
     const { app } = await callApi(deps, 'Koyeb', `${apiBase}/v1/apps`, { method: 'POST', headers: auth, json: { name: input.name } });
-    deps.log('Koyeb: creating the free web service from your repo');
+    deps.log(`${who('Koyeb', input.tag)}: creating the free web service from your repo`);
     const { service } = await callApi(deps, 'Koyeb', `${apiBase}/v1/services`, {
       method: 'POST',
       headers: auth,
@@ -81,7 +88,7 @@ export async function deployKoyeb(deps: Deps, input: BackendDeployInput, apiBase
     url = `https://${domain.name}`;
   }
 
-  deps.log('Koyeb: building and starting (this can take a few minutes)');
+  deps.log(`${who('Koyeb', input.tag)}: building and starting (this can take a few minutes)`);
   const status = await waitFor(
     deps,
     async () => {
@@ -95,6 +102,6 @@ export async function deployKoyeb(deps: Deps, input: BackendDeployInput, apiBase
     15 * 60_000
   );
   if (!status) throw new Error('Koyeb: still not healthy after 15 minutes');
-  deps.log(`Koyeb: live at ${url}${run.locked ? ' (locked: only your router gets in)' : ''}`);
+  deps.log(`${who('Koyeb', input.tag)}: live at ${url}${run.locked ? ' (locked: only your router gets in)' : ''}`);
   return { provider: 'koyeb', url, serviceId, ...(run.locked ? { locked: true } : {}) };
 }

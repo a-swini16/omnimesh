@@ -1,140 +1,146 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CloudApiError, waitFor, type Deps } from './http.js';
 import { ociClient, ociList, type OciCredentials } from './oci.js';
 import type { RepoInfo } from './detect.js';
 import { runSettings, type BackendDeployResult } from './koyeb.js';
 
-const PORT = 8000;
 const SHAPE = 'VM.Standard.A1.Flex';
 /** Always Free covers the first 1,500 OCPU hours and 9,000 GB hours of Arm a month: 2 OCPUs and 12 GB running all month */
 export const FREE_A1_OCPUS = 2;
 const GB_PER_OCPU = 6;
 const IMAGE_PREFIXES = ['Canonical-Ubuntu-24.04-aarch64', 'Canonical-Ubuntu-22.04-aarch64'];
 const BRANCH = /^[\w./-]+$/;
+/** Each service gets its own port: the main app 8000, the next 8010, and so on (the gate uses port + 1 for the app) */
+export const oraclePort = (index: number) => 8000 + index * 10;
+/** Oracle allows 32,000 bytes of instance metadata in total, the first-boot script included */
+const METADATA_LIMIT = 32_000;
+const AGENT_SOURCE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'oracle', 'agent.py');
+
+export interface OracleService {
+  /** Stable id: "main" for "/", else the route's name, e.g. "auth" */
+  id: string;
+  route: string;
+  repo: RepoInfo;
+  env: Record<string, string>;
+  /** Its own name on your Cloudflare domain, served by the tunnel */
+  hostname: string;
+  port: number;
+}
 
 export interface OracleDeployInput {
   creds: OciCredentials;
-  repo: RepoInfo;
+  /** Server name in the Oracle console */
   name: string;
-  env: Record<string, string>;
-  /** Public name the tunnel serves, e.g. oracle.example.com */
-  hostname: string;
+  services: OracleService[];
   tunnelToken: string;
   existing?: { serviceId: string; url: string; region?: string };
   lock?: boolean;
 }
 
-const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-
-/** Container recipe for repos without a Dockerfile, matching what Koyeb and Render run. */
-function dockerfileFor(repo: RepoInfo, startCommand?: string): string | null {
-  if (repo.runtime === 'docker') return null;
-  const base = repo.runtime === 'node' ? 'node:22-bookworm-slim' : 'python:3.12-slim';
-  return [
-    `FROM ${base}`,
-    'WORKDIR /app',
-    'COPY . .',
-    ...(repo.buildCommand ? [`RUN ${repo.buildCommand}`] : []),
-    // Exec form with sh -c so $PORT is expanded at run time and the command is never re-parsed by us
-    `CMD ["sh", "-c", ${JSON.stringify(startCommand ?? repo.startCommand ?? 'npm start')}]`,
-    '',
-  ].join('\n');
+/** oracle.example.com for the main app; oracle-auth.example.com for /auth (one level, so Cloudflare's free certificate covers it). */
+export function oracleHostname(base: string, id: string): string {
+  if (id === 'main') return base;
+  const [first, ...rest] = base.split('.');
+  return [`${first}-${id}`, ...rest].join('.');
 }
 
 /**
- * First-boot script for the VM. It installs Docker, runs your app on port 8000, and runs cloudflared so
- * the app is reachable only through the tunnel (no inbound ports are open). A timer pulls your branch
- * every 5 minutes and rebuilds only when a new commit arrived, so pushing to GitHub updates this server.
+ * What the server should run, read by the agent from the instance metadata. Changing it (a new service,
+ * a new setting) needs no new server: the agent applies it within 5 minutes.
  */
-export function oracleCloudInit(input: { repo: RepoInfo; env: Record<string, string>; tunnelToken: string; lock?: boolean }): string {
-  const { repo } = input;
-  if (!BRANCH.test(repo.branch)) throw new Error(`Oracle: "${repo.branch}" is not a branch name OmniMesh can use.`);
-  // The tunnel's public name reaches the app too, so it is locked like every other server
-  const run = runSettings(input);
-  const env = Object.entries({ ...input.env, ...run.env, PORT: String(PORT) })
-    .map(([k, v]) => {
-      if (!/^[A-Z_][A-Z0-9_]*$/.test(k) || /[\r\n]/.test(v)) throw new Error(`Oracle: environment variable ${k} cannot be passed to the server.`);
-      return `${k}=${v}`;
-    })
-    .join('\n');
-  const dockerfile = dockerfileFor(repo, run.startCommand);
-  const build = dockerfile ? 'docker build -f /opt/omnimesh/Dockerfile.omnimesh -t omnimesh-app src' : 'docker build -t omnimesh-app src';
+export function oracleManifest(input: { services: OracleService[]; tunnelToken: string; lock?: boolean }): string {
+  let gate = '';
+  const services = input.services.map((svc) => {
+    if (!BRANCH.test(svc.repo.branch)) throw new Error(`Oracle: "${svc.repo.branch}" is not a branch name OmniMesh can use.`);
+    for (const [k, v] of Object.entries(svc.env)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) || /[\r\n]/.test(v)) throw new Error(`Oracle: setting ${k} cannot be passed to the server.`);
+    }
+    // The tunnel's public name reaches the app too, so it is locked like every other server
+    const run = runSettings({ repo: svc.repo, lock: input.lock });
+    if (run.locked) gate = run.env.OMNIMESH_GATE;
+    return {
+      id: svc.id,
+      route: svc.route,
+      port: svc.port,
+      repoUrl: svc.repo.url,
+      branch: svc.repo.branch,
+      folder: svc.repo.folder ?? '',
+      runtime: svc.repo.runtime,
+      buildCommand: svc.repo.buildCommand ?? '',
+      startCommand: run.startCommand ?? svc.repo.startCommand ?? 'npm start',
+      gated: run.locked,
+      env: svc.env,
+    };
+  });
+  return JSON.stringify({ version: 1, tunnelToken: input.tunnelToken, gate, services });
+}
 
+/**
+ * First-boot script. It holds no secrets and nothing app-specific: it installs Docker and the OmniMesh
+ * agent, which reads the manifest from the instance metadata every 5 minutes and runs what it says.
+ * No inbound ports are opened; the Cloudflare tunnel connects out.
+ */
+export function oracleCloudInit(): string {
+  const agent = fs.readFileSync(AGENT_SOURCE).toString('base64');
   return `#!/bin/bash
 # Written by omnimesh up. Runs once, on the first boot.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y docker.io git
+apt-get install -y docker.io git python3
 systemctl enable --now docker
 mkdir -p /opt/omnimesh
-cd /opt/omnimesh
+chmod 700 /opt/omnimesh
+echo '${agent}' | base64 -d > /opt/omnimesh/agent.py
+chmod 700 /opt/omnimesh/agent.py
 
-cat > app.env <<'OMNIMESH_ENV'
-${env}
-OMNIMESH_ENV
-printf '%s' ${shellQuote(input.tunnelToken)} > tunnel.token
-chmod 600 app.env tunnel.token
-${dockerfile ? `cat > Dockerfile.omnimesh <<'OMNIMESH_DOCKERFILE'\n${dockerfile}OMNIMESH_DOCKERFILE\n` : ''}
-cat > deploy.sh <<'OMNIMESH_DEPLOY'
-#!/bin/bash
-# Pull the branch; rebuild and restart the app only when a new commit arrived (or it is not running)
-set -euo pipefail
-cd /opt/omnimesh
-if [ ! -d src/.git ]; then
-  git clone --depth 1 --branch ${shellQuote(repo.branch)} ${shellQuote(repo.url)} src
-else
-  old=$(git -C src rev-parse HEAD)
-  git -C src fetch --depth 1 origin ${shellQuote(repo.branch)}
-  new=$(git -C src rev-parse FETCH_HEAD)
-  running=$(docker ps -q -f name=^app$)
-  if [ "$old" = "$new" ] && [ -n "$running" ]; then exit 0; fi
-  # A commit that only changes .github (for example the OmniMesh watcher) needs no rebuild
-  if [ -n "$running" ] && git -C src diff --quiet "$old" "$new" -- . ':(exclude).github'; then git -C src reset --hard FETCH_HEAD; exit 0; fi
-  git -C src reset --hard FETCH_HEAD
-fi
-${build}
-docker rm -f app >/dev/null 2>&1 || true
-docker run -d --name app --restart unless-stopped --network host --env-file /opt/omnimesh/app.env omnimesh-app
-OMNIMESH_DEPLOY
-chmod 700 deploy.sh
-
-cat > /etc/systemd/system/omnimesh-deploy.service <<'OMNIMESH_UNIT'
+cat > /etc/systemd/system/omnimesh-agent.service <<'OMNIMESH_UNIT'
 [Unit]
-Description=OmniMesh: pull and run the latest commit
+Description=OmniMesh: run what this server's manifest says (tunnel and your services)
 After=docker.service network-online.target
 [Service]
 Type=oneshot
-ExecStart=/opt/omnimesh/deploy.sh
+ExecStart=/usr/bin/python3 /opt/omnimesh/agent.py
 OMNIMESH_UNIT
-cat > /etc/systemd/system/omnimesh-deploy.timer <<'OMNIMESH_TIMER'
+cat > /etc/systemd/system/omnimesh-agent.timer <<'OMNIMESH_TIMER'
 [Unit]
-Description=OmniMesh: check GitHub for new commits every 5 minutes
+Description=OmniMesh: apply new commits and settings every 5 minutes
 [Timer]
-OnBootSec=2min
+OnBootSec=1min
 OnUnitActiveSec=5min
 [Install]
 WantedBy=timers.target
 OMNIMESH_TIMER
 systemctl daemon-reload
-
-# Tunnel and timer first: if the first build fails (a network blip, a bug in the app), the timer
-# retries every 5 minutes and picks up the fix as soon as it is pushed
-docker rm -f tunnel >/dev/null 2>&1 || true
-docker run -d --name tunnel --restart unless-stopped --network host cloudflare/cloudflared:latest tunnel --no-autoupdate run --token "$(cat /opt/omnimesh/tunnel.token)"
-systemctl enable --now omnimesh-deploy.timer
-/opt/omnimesh/deploy.sh || echo "OmniMesh: first build failed; retrying every 5 minutes"
+systemctl enable --now omnimesh-agent.timer
+# If the first build fails (a network blip, a bug in the app), the timer retries every 5 minutes
+/usr/bin/python3 /opt/omnimesh/agent.py || echo "OmniMesh: first run failed; retrying every 5 minutes"
 `;
 }
 
 /**
- * Hosts the repo on an Oracle Always Free Arm VM in your home region, inside its own network with no
- * inbound ports, reachable only through a Cloudflare Tunnel at `hostname`.
+ * Hosts every service on one Oracle Always Free Arm VM in your home region, inside its own network with
+ * no inbound ports, each reachable only through the Cloudflare Tunnel at its own name.
+ * Returns one server per service.
  */
-export async function deployOracle(deps: Deps, input: OracleDeployInput, apiBase?: string): Promise<BackendDeployResult> {
+export async function deployOracle(deps: Deps, input: OracleDeployInput, apiBase?: string): Promise<Array<BackendDeployResult & { route: string }>> {
   const { creds } = input;
   const oci = ociClient(deps, creds, apiBase);
   const tenancy = creds.tenancy;
-  const url = `https://${input.hostname}`;
+  const manifest = oracleManifest(input);
+  const locked = JSON.parse(manifest).services.map((x: { gated: boolean }) => x.gated);
+  const results = (instanceId: string, region: string, pending: boolean) =>
+    input.services.map((svc, i) => ({
+      provider: 'oracle',
+      url: `https://${svc.hostname}`,
+      serviceId: instanceId,
+      region,
+      route: svc.route,
+      ...(pending ? { pending: true } : {}),
+      ...(locked[i] ? { locked: true } : {}),
+    }));
 
   // Always Free compute exists only in the home region
   const subs = await oci<Array<{ regionName: string; isHomeRegion: boolean }>>('identity', 'GET', `/tenancies/${tenancy}/regionSubscriptions`);
@@ -143,19 +149,34 @@ export async function deployOracle(deps: Deps, input: OracleDeployInput, apiBase
   const at = { region };
 
   if (input.existing) {
-    const { data: inst } = await oci<{ lifecycleState: string }>('iaas', 'GET', `/instances/${input.existing.serviceId}`, at).catch((e) => {
-      if (e instanceof CloudApiError && e.status === 404) return { data: { lifecycleState: 'TERMINATED' } };
+    const id = input.existing.serviceId;
+    const { data: inst } = await oci<{ lifecycleState: string; metadata?: Record<string, string> }>('iaas', 'GET', `/instances/${id}`, at).catch((e) => {
+      if (e instanceof CloudApiError && e.status === 404) return { data: { lifecycleState: 'TERMINATED' } as { lifecycleState: string; metadata?: Record<string, string> } };
       throw e;
     });
-    if (inst.lifecycleState === 'STOPPED') {
-      deps.log('Oracle: the server was stopped; starting it');
-      await oci('iaas', 'POST', `/instances/${input.existing.serviceId}`, { ...at, query: { action: 'START' } });
+    const alive = inst.lifecycleState !== 'TERMINATED' && inst.lifecycleState !== 'TERMINATING';
+    if (alive && inst.metadata?.omnimesh !== undefined) {
+      // Same server: hand it the new manifest (user_data must stay exactly as it is)
+      checkMetadataSize(inst.metadata.user_data ?? '', manifest);
+      await oci('iaas', 'PUT', `/instances/${id}`, { ...at, body: { metadata: { ...inst.metadata, omnimesh: manifest } } });
+      if (inst.lifecycleState === 'STOPPED') {
+        deps.log('Oracle: the server was stopped; starting it');
+        await oci('iaas', 'POST', `/instances/${id}`, { ...at, query: { action: 'START' } });
+      }
+      deps.log('Oracle: updated; the server applies your latest commits and settings within 5 minutes');
+      return results(id, region, false);
     }
-    if (inst.lifecycleState !== 'TERMINATED' && inst.lifecycleState !== 'TERMINATING') {
-      deps.log('Oracle: the server pulls your latest commit from GitHub by itself within 5 minutes');
-      return { provider: 'oracle', url: input.existing.url, serviceId: input.existing.serviceId, region };
+    if (alive) {
+      // Made by an older OmniMesh that ran one app without a manifest: replace it
+      deps.log('Oracle: replacing the server with one that can run several services');
+      await oci('iaas', 'DELETE', `/instances/${id}`, { ...at, query: { preserveBootVolume: 'false' } });
+      await waitFor(deps, async () => {
+        const { data } = await oci('iaas', 'GET', `/instances/${id}`, at);
+        return data.lifecycleState === 'TERMINATED' ? true : null;
+      }, 10 * 60_000);
+    } else {
+      deps.log('Oracle: the previous server is gone; creating a new one');
     }
-    deps.log('Oracle: the previous server is gone; creating a new one');
   }
 
   // Stay inside the free allowance: count Arm OCPUs already in use in the root compartment
@@ -219,8 +240,8 @@ export async function deployOracle(deps: Deps, input: OracleDeployInput, apiBase
   if (!image) throw new Error(`Oracle: no Ubuntu image for Arm servers was found in ${region}.`);
 
   const ads = await oci<Array<{ name: string }>>('identity', 'GET', '/availabilityDomains', { ...at, query: { compartmentId: tenancy } });
-  const userData = Buffer.from(oracleCloudInit({ repo: input.repo, env: input.env, tunnelToken: input.tunnelToken, lock: input.lock })).toString('base64');
-  const locked = runSettings(input).locked;
+  const userData = Buffer.from(oracleCloudInit()).toString('base64');
+  checkMetadataSize(userData, manifest);
 
   deps.log(`Oracle: creating a free Arm server (${ocpus} OCPU, ${ocpus * GB_PER_OCPU} GB)`);
   let instanceId: string | undefined;
@@ -237,7 +258,7 @@ export async function deployOracle(deps: Deps, input: OracleDeployInput, apiBase
           shapeConfig: { ocpus, memoryInGBs: ocpus * GB_PER_OCPU },
           sourceDetails: { sourceType: 'image', imageId: image.id, bootVolumeSizeInGBs: 50 },
           createVnicDetails: { subnetId, assignPublicIp: true },
-          metadata: { user_data: userData },
+          metadata: { user_data: userData, omnimesh: manifest },
           freeformTags: { omnimesh: input.name },
         },
       });
@@ -270,6 +291,7 @@ export async function deployOracle(deps: Deps, input: OracleDeployInput, apiBase
 
   // First boot installs Docker and builds your app; the tunnel answers once it is up
   deps.log('Oracle: server running; installing Docker and building your app (about 5 to 10 minutes)');
+  const url = `https://${input.services[0].hostname}`;
   const ready = await waitFor(deps, async () => {
     try {
       const res = await deps.fetch(url, { signal: AbortSignal.timeout(15_000) });
@@ -281,5 +303,12 @@ export async function deployOracle(deps: Deps, input: OracleDeployInput, apiBase
     }
   }, 15 * 60_000, 15_000);
   deps.log(ready ? `Oracle: live at ${url}` : 'Oracle: the server is still building. It joins your mesh by itself once it answers.');
-  return { provider: 'oracle', url, serviceId: instanceId, region, ...(ready ? {} : { pending: true }), ...(locked ? { locked: true } : {}) };
+  return results(instanceId, region, !ready);
+}
+
+function checkMetadataSize(userData: string, manifest: string): void {
+  const size = Buffer.byteLength(userData) + Buffer.byteLength(manifest) + 64;
+  if (size > METADATA_LIMIT) {
+    throw new Error(`Oracle: your services and settings need ${size} bytes, but Oracle allows ${METADATA_LIMIT} per server. Remove some settings or a service from Oracle.`);
+  }
 }

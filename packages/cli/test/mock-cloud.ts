@@ -12,8 +12,12 @@ export interface MockCloudOptions {
   oracleUsedOcpus?: number;
   /** State of an Oracle server created earlier */
   oracleInstanceState?: string;
+  /** Its metadata; without an "omnimesh" key it was made by an older OmniMesh */
+  oracleMetadata?: Record<string, string>;
   /** The hostname already has a DNS record pointing elsewhere */
   dnsTaken?: boolean;
+  /** The hostname already points at our tunnel (a redeploy) */
+  dnsOurs?: boolean;
   /** Base64 public key GitHub would hand out for encrypting secrets */
   githubPublicKey?: string;
   /** Health check path set on the Render service */
@@ -40,8 +44,8 @@ export function mockCloud(opts: MockCloudOptions = {}) {
 
     if (u.host === 'api.github.com') {
       if (p === '/repos/me/shop-api') return json({ private: Boolean(opts.privateRepo), default_branch: 'main' });
-      if (p === '/repos/me/shop-api/contents') return json([{ name: 'package.json' }, { name: 'src' }]);
-      if (p === '/repos/me/shop-api/contents/package.json')
+      if (p === '/repos/me/shop-api/contents' || p === '/repos/me/shop-api/contents/services/auth') return json([{ name: 'package.json' }, { name: 'src' }]);
+      if (p === '/repos/me/shop-api/contents/package.json' || p === '/repos/me/shop-api/contents/services/auth/package.json')
         return json({ content: Buffer.from(JSON.stringify({ scripts: { build: 'tsc', start: 'node dist/server.js' } })).toString('base64') });
       return json({ message: 'Not Found' }, 404);
     }
@@ -55,12 +59,16 @@ export function mockCloud(opts: MockCloudOptions = {}) {
     if (u.host === 'render.test') {
       if (opts.renderBroken) return json({ message: 'unauthorized' }, 401);
       if (p === '/v1/owners') return json([{ owner: { id: 'own1' } }]);
-      if (method === 'POST' && p === '/v1/services') return json({ service: { id: 'rsvc1', serviceDetails: { url: 'https://om-shop-api.onrender.com' } }, deployId: 'dep1' });
-      if (method === 'POST' && p === '/v1/services/rsvc1/deploys') return json({ id: 'dep2' });
-      if (method === 'GET' && p === '/v1/services/rsvc1') return json({ id: 'rsvc1', serviceDetails: { healthCheckPath: opts.renderHealthPath ?? '' } });
-      if (method === 'PATCH' && p === '/v1/services/rsvc1') return json({ id: 'rsvc1' });
-      if (method === 'PUT' && p.startsWith('/v1/services/rsvc1/env-vars/')) return json({ key: decodeURIComponent(p.split('/').pop()!), value: body.value });
-      if (method === 'GET' && p.startsWith('/v1/services/rsvc1/deploys/')) return json({ status: 'live' });
+      if (method === 'POST' && p === '/v1/services') {
+        // Each new Render service gets its own id and address (the first one is rsvc1, as before)
+        const n = calls.filter((c) => c.method === 'POST' && c.url === 'https://render.test/v1/services').length;
+        return json({ service: { id: n === 1 ? 'rsvc1' : `rsvc${n}`, serviceDetails: { url: `https://${body.name}.onrender.com` } }, deployId: 'dep1' });
+      }
+      if (method === 'POST' && /^\/v1\/services\/rsvc\d+\/deploys$/.test(p)) return json({ id: 'dep2' });
+      if (method === 'GET' && /^\/v1\/services\/rsvc\d+$/.test(p)) return json({ id: 'rsvc1', serviceDetails: { healthCheckPath: opts.renderHealthPath ?? '' } });
+      if (method === 'PATCH' && /^\/v1\/services\/rsvc\d+$/.test(p)) return json({ id: 'rsvc1' });
+      if ((method === 'PUT' || method === 'DELETE') && /^\/v1\/services\/rsvc\d+\/env-vars\//.test(p)) return json({ key: decodeURIComponent(p.split('/').pop()!), value: body.value });
+      if (method === 'GET' && /^\/v1\/services\/rsvc\d+\/deploys\//.test(p)) return json({ status: 'live' });
     }
     if (u.host === 'cloudflare.test') {
       if (p === '/accounts') return json({ success: true, result: [{ id: 'acc1' }] });
@@ -79,6 +87,7 @@ export function mockCloud(opts: MockCloudOptions = {}) {
       const cf = (result: unknown) => json({ success: true, result });
       if (method === 'GET' && p === '/zones') return cf(u.searchParams.get('name') === 'example.com' ? [{ id: 'zone1' }] : []);
       if (method === 'GET' && p === '/accounts/acc1/cfd_tunnel') return cf(calls.some((c) => c.method === 'POST' && c.url.endsWith('/cfd_tunnel')) ? [{ id: 'tun1' }] : []);
+      if (method === 'GET' && p === '/zones/zone1/dns_records' && opts.dnsOurs) return cf([{ id: 'r1', type: 'CNAME', content: 'tun1.cfargotunnel.com' }]);
       if (method === 'POST' && p === '/accounts/acc1/cfd_tunnel') return cf({ id: 'tun1', name: body.name });
       if (method === 'PUT' && p === '/accounts/acc1/cfd_tunnel/tun1/configurations') return cf({});
       if (method === 'GET' && p === '/zones/zone1/dns_records') return cf(opts.dnsTaken ? [{ id: 'r1', type: 'A', content: '203.0.113.7' }] : []);
@@ -103,15 +112,21 @@ export function mockCloud(opts: MockCloudOptions = {}) {
       if (method === 'GET' && oci === '/images') {
         return json([{ id: 'img-min', displayName: 'Canonical-Ubuntu-24.04-Minimal-aarch64-2026.09.18-0' }, { id: 'img1', displayName: 'Canonical-Ubuntu-24.04-aarch64-2026.09.18-0' }]);
       }
+      const deleted = calls.some((c) => c.method === 'DELETE' && c.url.includes('/instances/inst1'));
       if (method === 'POST' && oci === '/instances') {
         const capacity = opts.oracleCapacity ?? ADS;
         if (!capacity.includes(body.availabilityDomain)) return json({ code: 'InternalError', message: 'Out of host capacity.' }, 500);
-        return json({ id: 'inst1', lifecycleState: 'PROVISIONING' });
+        // After the old server was deleted, the new one gets a new id
+        return json({ id: deleted ? 'inst2' : 'inst1', lifecycleState: 'PROVISIONING' });
       }
-      if (method === 'GET' && oci.startsWith('/instances/')) return json({ id: 'inst1', lifecycleState: opts.oracleInstanceState ?? 'RUNNING' });
+      if (method === 'GET' && oci.startsWith('/instances/')) {
+        const old = oci.startsWith('/instances/inst1');
+        return json({ id: old ? 'inst1' : 'inst2', lifecycleState: old && deleted ? 'TERMINATED' : old ? opts.oracleInstanceState ?? 'RUNNING' : 'RUNNING', metadata: opts.oracleMetadata ?? { user_data: 'dXNlcg==', omnimesh: '{}' } });
+      }
       if (method === 'POST' && oci.startsWith('/instances/')) return json({ id: 'inst1', lifecycleState: 'STARTING' });
+      if ((method === 'PUT' || method === 'DELETE') && oci.startsWith('/instances/')) return json({ id: 'inst1' });
     }
-    if (u.host === 'oracle.example.com') return json({ ok: true });
+    if (u.host.endsWith('.example.com') && u.host.startsWith('oracle')) return json({ ok: true });
     if (u.host === 'github.test') {
       if (method === 'GET' && p === '/repos/me/shop-api/actions/secrets/public-key') return json({ key_id: 'k1', key: opts.githubPublicKey ?? '' });
       if (method === 'PUT' && p.startsWith('/repos/me/shop-api/actions/secrets/')) return new Response(null, { status: 201 });
