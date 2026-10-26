@@ -20,6 +20,19 @@
 
 <table>
   <tr>
+    <td align="center"><b>☁️ 10 Cloud Providers</b><br/><sub>Cloudflare, Koyeb, Render, Oracle…</sub></td>
+    <td align="center"><b>⚡ &lt;2.5s Auto-Failover</b><br/><sub>Sub-3s circuit breaking</sub></td>
+    <td align="center"><b>💰 $0 / Month</b><br/><sub>100% Free tiers · No card</sub></td>
+    <td align="center"><b>🧩 Multi-Server Pools</b><br/><sub>Path-based microservice routing</sub></td>
+    <td align="center"><b>📊 Live Dashboard</b><br/><sub>Real-time edge telemetry</sub></td>
+    <td align="center"><b>🛡️ Zero AWS Bills</b><br/><sub>No vendor lock-in</sub></td>
+  </tr>
+</table>
+
+<br/>
+
+<table>
+  <tr>
     <td align="right"><b>🚀 Start</b></td>
     <td align="center"><a href="#-quick-start-in-60-seconds">⚡ 60s Quickstart</a></td>
     <td align="center"><a href="#-multi-server-microservices-how-it-works">🌐 Microservices Fabric</a></td>
@@ -59,23 +72,20 @@
 
 <a id="-the-promise"></a>
 
-## 💰 $0 Cloud Bills. Sub-3s Auto-Failover. Real Multi-Server Microservices.
+## 💰 ~100,000 Free Requests / Day Across 10 Cloud Tiers
 
 </div>
 
-> ### 💥 The Promise: Multi-AZ Microservice Resilience Across Free Cloud Tiers
+> **Bring your own cloud accounts.** This is an estimated aggregate capacity across separately eligible third-party free tiers, not hosted infrastructure provided by OmniMesh. Sign up, generate your free API tokens where required, and connect the clouds you want to use; each cloud provider controls its own limits, availability, and terms.
 >
-> **Stop paying the $200+/month AWS tax before your project even gets its first customer.**
-> 
-> Running microservices usually means juggling AWS Application Load Balancers ($25–$40/mo), NAT Gateways ($32/mo), ECS clusters ($60+/mo), and CloudWatch alarms. If you opt for a single free-tier VPS instead, it sleeps after 15 minutes of inactivity or crashes during a traffic spike.
-> 
-> OmniMesh unites fragmented free-tier clouds into a self-healing, multi-cloud microservices fabric:
-> - 🌐 **1 Global Edge Domain:** Cloudflare Workers terminates TLS at 300+ edge locations worldwide with sub-50ms latency.
-> - 🧩 **Multi-Server Microservices:** Route `/auth`, `/api/ai`, `/api/orders`, and `/*` to dedicated server pools across Koyeb, Render, Oracle Cloud 24GB ARM, Deno Deploy, and Vercel.
-> - ⚡ **Sub-3s Auto-Failover & Circuit Breaking:** If a server crashes or sleeps, the next healthy node in the pool answers in <2.5 seconds.
-> - 🛡️ **Zero Blast Radius:** AI compute running out of RAM on Oracle never impacts Authentication on Koyeb or Orders on Render.
-> - 🔒 **Zero Double-Billing Risk:** Safe retries for financial writes backed by distributed `Idempotency-Key` in shared Redis.
-> - 💳 **100% Free / No Credit Card:** Built with strict "no-card mode" — zero surprise bills, zero vendor lock-in.
+> **Stacking free tiers by hand is painful** — dozens of separate consoles, rate limits that cause silent 429 downtime, cold starts (Render sleeps after 15 min idle), and the constant anxiety of a surprise cloud bill. OmniMesh unites them into **one self-healing multi-cloud fabric with sub-3s auto-failover, path-based microservice routing, and a real-time Operator Dashboard (`/_omnimesh/dashboard`)**.
+>
+> • 🌐 **1 Global Edge Domain:** Cloudflare Workers terminates TLS at 300+ edge locations worldwide with sub-50ms latency.  
+> • 🧩 **Multi-Server Microservices:** Route `/auth`, `/api/ai`, `/api/orders`, and `/*` to dedicated server pools across Koyeb, Render, Oracle Cloud 24GB ARM, Deno Deploy, and Vercel.  
+> • ⚡ **Sub-3s Auto-Failover & Circuit Breaking:** If a server crashes or sleeps, the next healthy node in the pool answers in <2.5 seconds.  
+> • 🛡️ **Zero Blast Radius:** AI compute running out of RAM on Oracle never impacts Authentication on Koyeb or Orders on Render.  
+> • 🔒 **Zero Double-Billing Risk:** Safe retries for financial writes backed by distributed `Idempotency-Key` in shared Redis.  
+> • 💳 **100% Free / No Credit Card:** Built with strict "no-card mode" — zero surprise bills, zero vendor lock-in.
 
 ---
 
