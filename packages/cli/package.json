@@ -21,7 +21,7 @@
     "@omnimesh/node": "workspace:*",
     "@omnimesh/providers": "workspace:*",
     "@omnimesh/router": "workspace:*",
-    "commander": "^13.1.0",
+    "commander": "^15.0.0",
     "esbuild": "^0.28.2",
     "hono": "^4.7.2",
     "libsodium-wrappers": "0.7.15",
