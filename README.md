@@ -2,21 +2,48 @@
 
 <img src="docs/images/logo.svg" width="76" alt="OmniMesh logo">
 
-# OmniMesh
+# 🚀 OmniMesh — The Open-Source AWS Alternative
 
-### The open-source AWS alternative: scale microservices across multiple clouds with sub-3s auto-failover.
+### Scale multi-server microservices across multiple clouds with sub-3s auto-failover at $0/mo.
 
 **One domain. Multiple clouds. Sub-3s auto-failover. Zero AWS bills.**
 
 [![CI](https://github.com/a-swini16/omnimesh/actions/workflows/ci.yml/badge.svg)](https://github.com/a-swini16/omnimesh/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![No credit card](https://img.shields.io/badge/credit%20card-not%20required-34c77b.svg)](docs/zero-card-guide.md)
-[![AWS Cost](https://img.shields.io/badge/AWS%20Cost-%240%2Fmo-34c77b.svg)](#why-omnimesh)
+[![AWS Cost](https://img.shields.io/badge/AWS%20ALB%20Cost-%240%2Fmo-34c77b.svg)](#-why-omnimesh)
 [![TypeScript strict](https://img.shields.io/badge/TypeScript-strict-3178c6.svg)](tsconfig.base.json)
-[![Load tested](https://img.shields.io/badge/load%20tested-0%20duplicate%20orders-5b8cff.svg)](#tested-under-load)
+[![Load tested](https://img.shields.io/badge/load%20tested-0%20duplicate%20orders-5b8cff.svg)](#-tested-under-load)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[Quick start](#quick-start) · [Microservices architecture](#multi-server-microservices-how-it-works) · [Dashboard](#the-dashboard) · [How it works](#how-it-works) · [Honest limits](#honest-limits) · [No-card guide](docs/zero-card-guide.md)
+<br/>
+
+<table>
+  <tr>
+    <td align="right"><b>🚀 Start</b></td>
+    <td align="center"><a href="#-quick-start-in-60-seconds">⚡ 60s Quickstart</a></td>
+    <td align="center"><a href="#-multi-server-microservices-how-it-works">🌐 Microservices Fabric</a></td>
+    <td align="center"><a href="#-the-live-operator-dashboard">📊 Live Dashboard</a></td>
+  </tr>
+  <tr>
+    <td align="right"><b>💡 Learn</b></td>
+    <td align="center"><a href="#-the-promise">💥 The Promise</a></td>
+    <td align="center"><a href="#-why-omnimesh">🤔 Why OmniMesh</a></td>
+    <td align="center"><a href="#-aws-vs-omnimesh-comparison">⚔️ AWS vs OmniMesh</a></td>
+  </tr>
+  <tr>
+    <td align="right"><b>⚙️ Engine</b></td>
+    <td align="center"><a href="#-path-based-routing-configuration">🎯 Path Routing</a></td>
+    <td align="center"><a href="#-tested-under-load">🛡️ Auto-Failover</a></td>
+    <td align="center"><a href="#-supported-cloud-providers">☁️ Free Cloud Providers</a></td>
+  </tr>
+  <tr>
+    <td align="right"><b>🧪 Proof</b></td>
+    <td align="center"><a href="#-tested-under-load">🏋️ Load Benchmarks</a></td>
+    <td align="center"><a href="#-security-invariants">🔒 Security</a></td>
+    <td align="center"><a href="#-honest-limits">📋 Honest Limits</a></td>
+  </tr>
+</table>
 
 <br/>
 
@@ -28,10 +55,34 @@
 
 ---
 
-## What OmniMesh does for you
+<div align="center">
+
+<a id="-the-promise"></a>
+
+## 💰 $0 Cloud Bills. Sub-3s Auto-Failover. Real Multi-Server Microservices.
+
+</div>
+
+> ### 💥 The Promise: Multi-AZ Microservice Resilience Across Free Cloud Tiers
+>
+> **Stop paying the $200+/month AWS tax before your project even gets its first customer.**
+> 
+> Running microservices usually means juggling AWS Application Load Balancers ($25–$40/mo), NAT Gateways ($32/mo), ECS clusters ($60+/mo), and CloudWatch alarms. If you opt for a single free-tier VPS instead, it sleeps after 15 minutes of inactivity or crashes during a traffic spike.
+> 
+> OmniMesh unites fragmented free-tier clouds into a self-healing, multi-cloud microservices fabric:
+> - 🌐 **1 Global Edge Domain:** Cloudflare Workers terminates TLS at 300+ edge locations worldwide with sub-50ms latency.
+> - 🧩 **Multi-Server Microservices:** Route `/auth`, `/api/ai`, `/api/orders`, and `/*` to dedicated server pools across Koyeb, Render, Oracle Cloud 24GB ARM, Deno Deploy, and Vercel.
+> - ⚡ **Sub-3s Auto-Failover & Circuit Breaking:** If a server crashes or sleeps, the next healthy node in the pool answers in <2.5 seconds.
+> - 🛡️ **Zero Blast Radius:** AI compute running out of RAM on Oracle never impacts Authentication on Koyeb or Orders on Render.
+> - 🔒 **Zero Double-Billing Risk:** Safe retries for financial writes backed by distributed `Idempotency-Key` in shared Redis.
+> - 💳 **100% Free / No Credit Card:** Built with strict "no-card mode" — zero surprise bills, zero vendor lock-in.
+
+---
+
+## ⚡ What OmniMesh does for you
 
 1. **You give it your backend's GitHub link.**
-2. **It hosts your microservices across several free clouds at once and gives you one unified domain.**
+2. **It deploys your microservices across several free clouds at once and gives you one unified domain.**
 3. **If a server crashes, sleeps, or runs out of free quota, another server answers in <2.5 seconds.** Your users never notice.
 
 <!-- STATUS:START -->
@@ -49,7 +100,9 @@
 
 ---
 
-## Why OmniMesh
+<a id="-why-omnimesh"></a>
+
+## 🤔 Why OmniMesh?
 
 To run resilient, multi-server microservices on AWS, you are forced to configure:
 - **Route 53 Hosted Zone** ($0.50/mo + query costs)
@@ -60,11 +113,28 @@ To run resilient, multi-server microservices on AWS, you are forced to configure
 
 **You easily pay $150–$500/month before processing meaningful traffic.** And if AWS `us-east-1` has an outage, your entire microservice mesh goes down with it.
 
-If you opt for a single free-tier VPS, it sleeps after 15 minutes of inactivity, runs out of memory on spikes, or fails silently at 3 AM.
+<details>
+<summary><b>💸 Click to see the hidden AWS bill breakdown vs. OmniMesh $0</b></summary>
+<br/>
 
-**OmniMesh gives you the architecture of a multi-AZ AWS deployment distributed across independent cloud providers for $0/month.**
+| Component | AWS Cloud Bill (Monthly Minimum) | OmniMesh Equivalent | OmniMesh Cost |
+| :--- | :--- | :--- | :--- |
+| **Edge Router / Ingress** | Route 53 ($0.50) + ALB ($28.00) + LCU fees (~$15.00) | Cloudflare Worker Edge Router | **$0.00** |
+| **VPC & Network Egress** | NAT Gateway ($32.40) + Egress fees ($0.09/GB) | Multi-cloud direct mesh peering | **$0.00** |
+| **Compute Pools** | 3x ECS Fargate / EC2 instances (~$60.00) | Koyeb + Render + Oracle 24GB ARM | **$0.00** |
+| **Metrics & Alerts** | CloudWatch Metrics, Alarms & Logs (~$25.00) | Live Edge Operator Dashboard | **$0.00** |
+| **State & Caching** | Amazon Aurora Serverless + ElastiCache (~$50.00) | Neon Postgres + Upstash Redis | **$0.00** |
+| **Total Monthly Spend** | **$210.90+ / month** | **OmniMesh Federation** | **$0.00 / month** |
 
-| Feature | AWS Architecture | Single Free VPS | **OmniMesh Multi-Cloud Mesh** |
+</details>
+
+<br/>
+
+<a id="-aws-vs-omnimesh-comparison"></a>
+
+### ⚔️ AWS vs. OmniMesh Comparison
+
+| Feature | AWS Production Setup | Single Free VPS | **OmniMesh Multi-Cloud Mesh** |
 | :--- | :--- | :--- | :--- |
 | **Monthly cost** | $150 – $500+/mo | $0 | **$0 / month** |
 | **Credit card required** | Required | Sometimes | **Not required** (no-card mode) |
@@ -73,11 +143,13 @@ If you opt for a single free-tier VPS, it sleeps after 15 minutes of inactivity,
 | **Multi-server microservices** | ALB + ECS Target Groups | Manual Nginx configs | **Built-in path-prefix routing per pool** |
 | **Financial write safety** | Custom SQS/DynamoDB locks | None (double billing risk) | **Idempotency-Key in shared Redis** |
 | **Operations observability** | CloudWatch ($$$) | Provider console tabs | **One live unified Operator Dashboard** |
-| **Free scale ceiling** | 0 requests free | Quota of single VPS | **~100,000 requests/day** ([honest limits](#honest-limits)) |
+| **Free scale ceiling** | 0 requests free | Quota of single VPS | **~100,000 requests/day** ([honest limits](#-honest-limits)) |
 
 ---
 
-## Multi-Server Microservices: How It Works
+<a id="-multi-server-microservices-how-it-works"></a>
+
+## 🌐 Multi-Server Microservices: How It Works
 
 Just like AWS Application Load Balancers route path patterns to dedicated **Target Groups**, OmniMesh's global edge router dispatches traffic based on path prefixes to **dedicated server pools across multiple clouds**.
 
@@ -111,7 +183,9 @@ flowchart TD
   end
 ```
 
-### Path-Based Routing Configuration
+<a id="-path-based-routing-configuration"></a>
+
+### 🎯 Path-Based Routing Configuration
 
 Defining multiple microservice servers in `omnimesh.config.yaml` is clean and declarative:
 
@@ -164,16 +238,32 @@ pools:
       weight: 1
 ```
 
-### Why Multi-Server Microservices on OmniMesh Win
+<details>
+<summary><b>🧪 Try it live with cURL: test path routing & failover</b></summary>
+<br/>
 
-1. **Zero Blast Radius:** If your AI microservice on Oracle runs out of RAM or times out, your Auth microservice on Koyeb and Checkout on Render continue operating at full speed.
-2. **Sub-3s Automatic Circuit Breaking:** If any node throws `502`–`504` or exceeds 2.5s, the edge router immediately forwards the request to the next server in the pool and opens a 30-second circuit breaker on the failing node.
-3. **No Double-Charging:** Retries for non-idempotent operations (POST/PATCH) require an `Idempotency-Key` verified against shared Upstash Redis. Failover never executes a payment or order twice.
-4. **Single-Writer Database Integrity:** All servers connect to one shared serverless Postgres (Neon or Supabase). No split-brain, no data synchronization nightmares.
+```bash
+# 1. Test Auth microservice routing
+curl -i https://your-mesh-domain.com/auth/health
+
+# 2. Test transactional API with Idempotency Key (safe retries)
+curl -i -X POST https://your-mesh-domain.com/api/orders \
+  -H "Idempotency-Key: ord_checkout_991823" \
+  -H "Content-Type: application/json" \
+  -d '{"item":"pro-tier","qty":1}'
+
+# 3. Inspect router operator status telemetry (needs status token)
+curl -i https://your-mesh-domain.com/_omnimesh/status \
+  -H "Authorization: Bearer YOUR_STATUS_TOKEN"
+```
+
+</details>
 
 ---
 
-## Quick start
+<a id="-quick-start-in-60-seconds"></a>
+
+## 🚀 Quick start in 60 seconds
 
 ### Host your backend across multiple servers in 3 steps
 
@@ -199,7 +289,9 @@ node packages/cli/bin/omnimesh.js up
 
 To deploy updates, simply run `node packages/cli/bin/omnimesh.js up` again and click **Redeploy latest code**.
 
-### CLI Commands Reference
+<details>
+<summary><b>⚡ CLI Commands Reference & Operational Cheat Sheet</b></summary>
+<br/>
 
 | Command | What it does |
 | :--- | :--- |
@@ -207,14 +299,18 @@ To deploy updates, simply run `node packages/cli/bin/omnimesh.js up` again and c
 | `omnimesh open` | Opens your Operator Dashboard, already authenticated |
 | `omnimesh token [--rotate]` | Displays your dashboard sign-in key, or rotates it on the live router |
 | `omnimesh deploy` | Headless redeploy: builds and rolls out latest code to all clouds |
-| `omnimesh chaos` | Real-world failover drill: pauses the active node, verifies another cloud answers, resumes node |
+| `omnimesh chaos` | Real-world failover drill: pauses active node, verifies another cloud answers, resumes node |
 | `omnimesh status` | Live terminal telemetry: health, latency, and status for every node |
 | `omnimesh doctor` | Validates configuration, inspects gateway secrets, and warns of weak settings |
 | `omnimesh init` / `add-provider` | Manual headless setup if you manage servers directly and want the router layer |
 
+</details>
+
 ---
 
-## The dashboard
+<a id="-the-live-operator-dashboard"></a>
+
+## 📊 The Live Operator Dashboard
 
 The router serves a real-time Operator Dashboard at `https://<your-domain>/_omnimesh/dashboard`. Sign in with your status token or open directly via `omnimesh open`.
 
@@ -232,7 +328,9 @@ Dashboard features:
 
 ---
 
-## Tested under load
+<a id="-tested-under-load"></a>
+
+## 🏋️ Tested under load
 
 The mock mesh tests 5 mock providers behind the real router under heavy k6 load. These figures demonstrate **router behavior** under adverse real-world conditions. Reproduce with `benchmarks/mock-mesh/run.sh <scenario>`.
 
@@ -245,9 +343,28 @@ The mock mesh tests 5 mock providers behind the real router under heavy k6 load.
 | **Oversized payload, malformed JSON, buggy route** | `413` / `400` on first attempt; healthy nodes retained in rotation |
 | **44,725 authenticated profile requests** | 0 cross-user leakages, 0 cacheable private responses |
 
+<details>
+<summary><b>⚡ How to run a live chaos drill on your deployment (<code>omnimesh chaos</code>)</b></summary>
+<br/>
+
+Run this directly against your live mesh:
+```bash
+node packages/cli/bin/omnimesh.js chaos
+```
+What happens behind the scenes:
+1. Identifies the primary server answering current production traffic.
+2. Injects a temporary pause on that server.
+3. Fires test requests through the Cloudflare Edge Router.
+4. Verifies the secondary cloud picks up traffic within 2.5 seconds with zero dropped requests.
+5. Resumes the paused server and confirms clean health restoration.
+
+</details>
+
 ---
 
-## Supported Providers
+<a id="-supported-cloud-providers"></a>
+
+## ☁️ Supported Cloud Providers
 
 Free-tier limits are codified in each provider's `limits.json` file with a verified date and link to the official pricing page.
 
@@ -268,7 +385,9 @@ Free-tier limits are codified in each provider's `limits.json` file with a verif
 
 ---
 
-## Security
+<a id="-security-invariants"></a>
+
+## 🔒 Security Invariants
 
 - **Fail-Closed Gateways:** the router and backend nodes refuse to boot without a strong cryptographic gateway secret, and plain HTTP upstreams are rejected.
 - **Hidden Backends:** client-supplied gateway headers are stripped, backend URLs never leak in responses, and operator endpoints return 404 without the status token.
@@ -278,7 +397,9 @@ Free-tier limits are codified in each provider's `limits.json` file with a verif
 
 ---
 
-## Honest limits
+<a id="-honest-limits"></a>
+
+## 📋 Honest limits
 
 Open-source projects that overpromise get shredded on Hacker News. Here is what OmniMesh does **not** do:
 
@@ -288,9 +409,27 @@ Open-source projects that overpromise get shredded on Hacker News. Here is what 
 4. **WebSockets do not fail over mid-packet.** If a server drops, WebSocket clients reconnect and immediately land on a healthy node.
 5. **Cold starts exist on free tiers.** Render and Koyeb sleep when idle. Keep-alive pings can maintain warm instances where provider terms permit.
 
+<details>
+<summary><b>❓ Frequently Asked Questions (FAQ)</b></summary>
+<br/>
+
+**Q: How does OmniMesh prevent data corruption if multiple clouds answer?**  
+A: All nodes are stateless and connect to a single authoritative serverless Postgres (Neon or Supabase). Writes are never partitioned.
+
+**Q: What happens if Render sleeps?**  
+A: When Render is sleeping (spins down after 15 min idle), the router's 2.5s timeout triggers and the request is immediately served by Koyeb. If `keepAwake: true` is enabled, an automated heartbeat keeps the container warm.
+
+**Q: Can I use custom domains?**  
+A: Yes! You can point your own domain (e.g., `api.example.com`) directly to the Cloudflare Worker router with 1 CNAME record.
+
+**Q: Do I need a credit card?**  
+A: No! In "no-card mode" (`omnimesh init --no-card`), OmniMesh configures only providers that require zero credit card verification.
+
+</details>
+
 ---
 
-## Project layout
+## 🛠️ Project layout
 
 ```
 packages/
@@ -306,12 +445,12 @@ docs/          Architecture, no-card guide, security audit report
 
 ---
 
-## Contributing
+## 👥 Contributing
 
 New cloud provider adapters are the fastest way to contribute: copy [`packages/providers/_template`](packages/providers/_template), populate `limits.json` from the provider's official documentation, and add a test. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
-## License
+## 📄 License
 
 [MIT](LICENSE) © 2026 OmniMesh contributors
