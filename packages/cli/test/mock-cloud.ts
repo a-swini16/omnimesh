@@ -1,7 +1,7 @@
 import type { Deps } from '../src/up/http.js';
 
 /** A fake cloud: GitHub, Koyeb, Render and Cloudflare APIs plus the deployed router, all in memory. */
-export function mockCloud(opts: { renderBroken?: boolean; privateRepo?: boolean; noSubdomain?: boolean } = {}) {
+export function mockCloud(opts: { renderBroken?: boolean; privateRepo?: boolean; noSubdomain?: boolean; cronLimit?: boolean } = {}) {
   const calls: Array<{ method: string; url: string; body: any }> = [];
   let koyebPolls = 0;
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -42,6 +42,11 @@ export function mockCloud(opts: { renderBroken?: boolean; privateRepo?: boolean;
       if (method === 'POST' && p === '/accounts/acc1/storage/kv/namespaces') return json({ success: true, result: { id: 'kv1' } });
       if (method === 'PUT' && p === '/accounts/acc1/workers/scripts/om-shop-api') return json({ success: true, result: {} });
       if (method === 'POST' && p.endsWith('/subdomain')) return json({ success: true, result: {} });
+      if (method === 'PUT' && p === '/accounts/acc1/workers/scripts/om-shop-api/schedules') {
+        return opts.cronLimit
+          ? json({ success: false, errors: [{ message: 'You have exceeded the limit of 5 cron triggers.' }] }, 400)
+          : json({ success: true, result: { schedules: body } });
+      }
       if (method === 'GET' && p === '/accounts/acc1/workers/subdomain') return opts.noSubdomain ? json({ success: false, errors: [{ message: 'no subdomain' }] }, 404) : json({ success: true, result: { subdomain: 'me' } });
     }
     if (u.host === 'om-shop-api.me.workers.dev') {

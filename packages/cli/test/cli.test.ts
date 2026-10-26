@@ -8,7 +8,6 @@ import {
   runAddProvider,
   runRemoveProvider,
   runDeploy,
-  runChaos,
 } from '../src/index.js';
 import { parseOmniMeshConfigYaml } from '@omnimesh/core';
 import { spawnSync } from 'node:child_process';
@@ -88,10 +87,6 @@ describe('OmniMesh CLI Suite (init, doctor, deploy, chaos, add/remove)', () => {
     expect(success).toBe(true);
   });
 
-  it('executes live chaos simulation proving sub-3s failover', async () => {
-    // Chaos spins up 2 ephemeral mock nodes, kills primary, and tests router failover
-    await expect(runChaos({ timeoutMs: 1000 })).resolves.toBe(true);
-  });
 
   it('[H-3] the omnimesh binary runs straight from a clean checkout', () => {
     const bin = path.resolve(__dirname, '../bin/omnimesh.js');

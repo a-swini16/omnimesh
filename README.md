@@ -126,6 +126,7 @@ To ship new code, run `omnimesh up` again and click **Redeploy latest code**. Ev
 | `omnimesh open` | Opens your dashboard, already signed in |
 | `omnimesh token [--rotate]` | Shows your dashboard sign-in key, or replaces it on the live router |
 | `omnimesh deploy` | Redeploys the latest code to every cloud (no page needed) |
+| `omnimesh chaos` | Real failover test on your deployment: pauses the server that answers, shows another cloud taking over, then resumes it |
 | `omnimesh status` | Live health and latency for every node |
 | `omnimesh doctor` | Finds weak or missing secrets, unknown providers and invalid config |
 | `omnimesh init` / `add-provider` | Advanced manual setup, if you host your backend yourself and only want the router |

@@ -5,7 +5,6 @@
 
   const TOKEN_KEY = 'omnimesh.statusToken';
   const THEME_KEY = 'omnimesh.theme';
-  const INTRO_KEY = 'omnimesh.introDismissed';
   const POLL_MS = 3000;
 
   const state = {
@@ -20,9 +19,14 @@
     providerFilter: 'all',
     providerSearch: '',
     builder: null,
-    testResult: '',
     lastSignature: '',
+    lastRender: 0,
     pendingBuilderAdd: null,
+    // Owner actions in progress, and the last one's result (shown under the status headline)
+    checking: false,
+    autoChecked: false,
+    failoverRunning: false,
+    lastAction: '',
   };
 
   // ---------------------------------------------------------------- helpers
@@ -109,6 +113,14 @@
     globe: [['circle', { cx: 12, cy: 12, r: 10 }], ['path', { d: 'M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z' }]],
     minus: [['path', { d: 'M5 12h14' }]],
     help: [['circle', { cx: 12, cy: 12, r: 10 }], ['path', { d: 'M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01' }]],
+    server: [['rect', { x: 2, y: 3, width: 20, height: 8, rx: 2 }], ['rect', { x: 2, y: 13, width: 20, height: 8, rx: 2 }], ['path', { d: 'M6 7h.01M6 17h.01' }]],
+    pause: [['rect', { x: 6, y: 4, width: 4, height: 16, rx: 1 }], ['rect', { x: 14, y: 4, width: 4, height: 16, rx: 1 }]],
+    play: [['path', { d: 'M6 4l14 8-14 8z' }]],
+    refresh: [['path', { d: 'M21 12a9 9 0 1 1-2.64-6.36L21 8' }], ['path', { d: 'M21 3v5h-5' }]],
+    zap: [['path', { d: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z' }]],
+    shield: [['path', { d: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' }]],
+    clock: [['circle', { cx: 12, cy: 12, r: 10 }], ['path', { d: 'M12 6v6l4 2' }]],
+    git: [['circle', { cx: 6, cy: 6, r: 2.5 }], ['circle', { cx: 6, cy: 18, r: 2.5 }], ['circle', { cx: 18, cy: 9, r: 2.5 }], ['path', { d: 'M6 8.5v7M18 11.5c0 3-4 3.5-9.5 5' }]],
   };
   function icon(name, size) {
     const s = size || 16;
@@ -204,6 +216,14 @@
   function tile(id, name, size) {
     return h('div', { class: 'mono-tile', text: monogram(name), style: { background: providerColor(id), width: size ? size + 'px' : '', height: size ? size + 'px' : '' } });
   }
+  function catalogEntry(id) {
+    return (state.catalog || []).find((p) => p.id === id) || null;
+  }
+  /** "Koyeb" for a provider id, else the node label */
+  function cloudName(n) {
+    const p = n.providerId && catalogEntry(n.providerId);
+    return p ? p.displayName.split(' ')[0] : n.label;
+  }
 
   function limitsSummary(l) {
     if (!l) return '';
@@ -217,18 +237,23 @@
     return parts.slice(0, 3).join(' · ');
   }
 
-  /** serving | standby (a checked backup) | down | quota | paused | unchecked (no check has run yet) */
+  /**
+   * What a server is doing, from the router's own evidence (live traffic or its latest check):
+   * serving | standby (online backup) | error (answers 500) | down | quota | paused | unchecked
+   */
   function nodeState(n) {
     if (n.state === 'paused') return 'paused';
     if (n.state === 'down') return 'down';
     if (n.quota && n.quota.percentUsed >= 95) return 'quota';
+    if (n.state === 'error') return 'error';
     if (n.state === 'healthy') return n.isBackup ? 'standby' : 'serving';
     return 'unchecked';
   }
   const STATE_VIEW = {
     serving: { cls: 'ok', label: 'Online' },
-    standby: { cls: 'idle', label: 'Backup, ready' },
-    down: { cls: 'bad', label: 'Offline' },
+    standby: { cls: 'ok', label: 'Online, backup' },
+    error: { cls: 'warn', label: 'Answering with errors' },
+    down: { cls: 'bad', label: 'Not answering' },
     quota: { cls: 'warn', label: 'Free limit reached' },
     paused: { cls: 'warn', label: 'Paused by you' },
     unchecked: { cls: 'idle', label: 'Not checked yet' },
@@ -247,53 +272,191 @@
     for (const p of status.pools) for (const n of p.nodes) out.push(Object.assign({ pool: p.prefix }, n));
     return out;
   }
+  function uniqueByUrl(nodes) {
+    const seen = new Map();
+    for (const n of nodes) if (!seen.has(n.url)) seen.set(n.url, n);
+    return [...seen.values()];
+  }
+  function hostOf(url) {
+    try {
+      return new URL(url).host;
+    } catch (e) {
+      return url;
+    }
+  }
+  function clockTime(iso) {
+    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+  function listWords(items) {
+    if (items.length <= 1) return items.join('');
+    return items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1];
+  }
 
-  function alerts(status) {
+  /** The one-sentence answer to "is my app OK?", from real state only. */
+  function verdict(s) {
+    const nodes = uniqueByUrl(allNodes(s));
+    const names = (list) => listWords(list.map((n) => n.label));
+    const downPools = s.pools.filter((p) => p.nodes.length && p.nodes.every((n) => n.state === 'down'));
+    const down = nodes.filter((n) => n.state === 'down');
+    const error = nodes.filter((n) => n.state === 'error');
+    const paused = nodes.filter((n) => n.state === 'paused');
+    const online = nodes.filter((n) => n.state === 'healthy');
+    const unknown = nodes.filter((n) => n.state === 'unknown');
+
+    if (downPools.length) {
+      return {
+        cls: 'bad',
+        icon: 'x',
+        title: 'Your app is down',
+        text: 'No server for ' + listWords(downPools.map((p) => p.prefix)) + ' is answering, so visitors get an error. ' + down.map((n) => n.label + ': ' + (n.failureReason || 'no answer')).join('. ') + '. Open that cloud’s dashboard and look at your app’s logs.',
+      };
+    }
+    if (online.length === 0 && unknown.length === nodes.length) {
+      return {
+        cls: 'idle',
+        icon: 'clock',
+        title: 'Not checked yet',
+        text: 'No request has gone through this copy of the router yet, and no health check has run. Press Check now to ask every server.',
+      };
+    }
+    const others = online.length ? names(online) + (online.length === 1 ? ' is' : ' are') + ' answering' : 'the other servers are answering';
+    if (down.length) {
+      return {
+        cls: 'warn',
+        icon: 'alert',
+        title: 'Your app is up, but ' + names(down) + (down.length === 1 ? ' is' : ' are') + ' not answering',
+        text: others + ', so your visitors are not affected. ' + down.map((n) => n.label + ': ' + (n.failureReason || 'no answer')).join('. ') + '.',
+      };
+    }
+    if (error.length) {
+      return {
+        cls: 'warn',
+        icon: 'alert',
+        title: 'Your app is up, but ' + names(error) + ' reports a problem',
+        text: error.map((n) => n.label + ': ' + (n.failureReason || 'answered 500')).join('. ') + '. The router still uses it, because a 500 is your app’s own answer. Check that app’s logs.',
+      };
+    }
+    if (paused.length && online.length === 0) {
+      return {
+        cls: 'idle',
+        icon: 'clock',
+        title: names(paused) + (paused.length === 1 ? ' is' : ' are') + ' paused; the others are not checked yet',
+        text: 'Nothing has shown yet whether your other servers answer. Press Check now, or Resume to undo the pause.',
+      };
+    }
+    if (paused.length) {
+      return {
+        cls: 'ok',
+        icon: 'check',
+        title: 'Your app is up. ' + names(paused) + (paused.length === 1 ? ' is' : ' are') + ' paused',
+        text: others + '. ' + paused.map((n) => n.label + ' comes back at ' + clockTime(n.pausedUntil)).join('. ') + ', or press Resume.',
+      };
+    }
+    const clouds = listWords([...new Set(nodes.map(cloudName))]);
+    const tail = unknown.length ? ' ' + names(unknown) + (unknown.length === 1 ? ' has' : ' have') + ' not been checked yet.' : '';
+    return {
+      cls: 'ok',
+      icon: 'check',
+      title: 'Your app is up',
+      text:
+        (nodes.length === 1
+          ? 'One server on ' + clouds + ' is answering. Add a second cloud so your app keeps running if it fails.'
+          : plural(online.length, 'server') + ' on ' + clouds + (online.length === 1 ? ' is' : ' are') + ' answering. If one fails, the next takes over within ' + ms(s.routerConfig.timeoutMs) + '.') + tail,
+    };
+  }
+
+  /** Things the owner should know or do, worst first. Each has a plain fix. */
+  function todos(s) {
+    const nodes = uniqueByUrl(allNodes(s));
     const list = [];
-    const seenQuota = new Set();
-    for (const n of allNodes(status)) {
-      if (n.state === 'down') {
-        list.push({ cls: 'bad', text: n.label + ' is down in ' + n.pool + (n.failureReason ? ' (' + n.failureReason + ')' : '') + '. Traffic is going to the other nodes.' });
-      }
-      if (n.quota && !seenQuota.has(n.label)) {
-        if (n.quota.percentUsed >= 95) {
-          seenQuota.add(n.label);
-          list.push({ cls: 'warn', text: n.label + ' reached its free quota (' + n.quota.percentUsed + '%). Traffic moved to the next free tier.' });
-        } else if (n.quota.percentUsed >= 80) {
-          seenQuota.add(n.label);
-          list.push({ cls: 'warn', text: n.label + ' has used ' + n.quota.percentUsed + '% of its free quota. Traffic moves on at 95%.' });
-        }
+    const down = nodes.filter((n) => n.state === 'down');
+    const error = nodes.filter((n) => n.state === 'error');
+    const unknown = nodes.filter((n) => n.state === 'unknown');
+    if (down.length) {
+      list.push({ state: 'bad', title: listWords(down.map((n) => n.label)) + (down.length === 1 ? ' is' : ' are') + ' not answering', detail: down.map((n) => n.label + ': ' + (n.failureReason || 'no answer')).join('. ') + '. Open that cloud’s dashboard, look at the app’s logs, and redeploy with omnimesh deploy if needed.' });
+    }
+    if (error.length) {
+      list.push({ state: 'warn', title: listWords(error.map((n) => n.label)) + ' answered its health check with an error', detail: 'Your app is running there but says something is wrong (for example, it cannot reach its database). Check that app’s logs.' });
+    }
+    if (!down.length && !error.length) {
+      list.push(unknown.length
+        ? { state: 'idle', title: 'Every server answers', detail: listWords(unknown.map((n) => n.label)) + ' not checked yet. Press Check now.' }
+        : { state: 'ok', title: 'Every server answers', detail: 'Each server answered its latest request or check.' });
+    }
+
+    const single = s.pools.filter((p) => p.nodes.length === 1);
+    const sameCloud = s.pools.filter((p) => p.nodes.length > 1 && new Set(p.nodes.map((n) => n.providerId || n.url)).size === 1);
+    if (single.length) {
+      list.push({ state: 'warn', title: 'Only one server for ' + listWords(single.map((p) => p.prefix)), detail: 'If it goes down, your app goes down: there is nothing to fail over to. Run omnimesh up in your project folder and connect a second cloud.' });
+    } else if (sameCloud.length) {
+      list.push({ state: 'warn', title: 'All servers for ' + listWords(sameCloud.map((p) => p.prefix)) + ' are on one cloud', detail: 'An outage at that cloud takes them all down. Connect another cloud with omnimesh up.' });
+    } else {
+      list.push({ state: 'ok', title: 'Backup on another cloud', detail: 'Every route has servers on more than one cloud, so one cloud failing does not take your app down.' });
+    }
+
+    const open = nodes.filter((n) => n.lock === 'open');
+    const lockUnknown = nodes.filter((n) => n.lock === 'unknown');
+    if (open.length) {
+      list.push({ state: 'warn', title: listWords(open.map((n) => n.label)) + (open.length === 1 ? ' is' : ' are') + ' not locked', detail: 'Anyone who finds ' + (open.length === 1 ? 'its address' : 'their addresses') + ' (' + open.map((n) => hostOf(n.url)).join(', ') + ') can call your app directly and skip the router’s protection. Fix: add gatewayAuth() from @omnimesh/node to your app, then run omnimesh deploy.' });
+    } else if (lockUnknown.length) {
+      list.push({ state: 'idle', title: 'Servers locked to the router', detail: 'Not known yet for ' + listWords(lockUnknown.map((n) => n.label)) + '. The next health check finds out.' });
+    } else {
+      list.push({ state: 'ok', title: 'Servers locked to the router', detail: 'Every server refuses requests that did not come through your router.' });
+    }
+
+    if (s.sharing.health !== 'shared') {
+      list.push({ state: 'warn', title: 'Automatic health checks are off', detail: 'The router has no shared store (Cloudflare KV), so it cannot run or share checks. Run omnimesh up again to set it up.' });
+    } else if (!s.checks.lastScheduledAt) {
+      list.push({ state: 'idle', title: 'Automatic health checks', detail: 'Have not run yet. They run every 5 minutes once Cloudflare has the schedule (omnimesh up sets it). If this stays for more than 10 minutes, run omnimesh up again.' });
+    } else if (Date.now() - Date.parse(s.checks.lastScheduledAt) > 15 * 60_000) {
+      list.push({ state: 'warn', title: 'Automatic health checks stopped', detail: 'They last ran ' + ago(Date.parse(s.checks.lastScheduledAt)) + ' but should run every 5 minutes. Run omnimesh up again to restore the schedule.' });
+    } else {
+      list.push({ state: 'ok', title: 'Automatic health checks', detail: 'Every 5 minutes. Last ran ' + ago(Date.parse(s.checks.lastScheduledAt)) + '.' });
+    }
+
+    for (const p of s.pools) {
+      const main = p.nodes.find((n) => !n.isBackup);
+      if (main && main.sleepsIfIdle && s.routerConfig.strategy !== 'weighted' && !s.keepAlive.enabled) {
+        list.push({ state: 'warn', title: main.label + ' is your main server for ' + p.prefix + ', but it sleeps when idle', detail: 'After a quiet spell, the first visitor waits 30–50 s while it wakes up. Put a cloud that stays on (like Koyeb) first, and keep this one as the backup.' });
       }
     }
-    return list;
-  }
 
-  function banners(status) {
-    const list = alerts(status);
-    if (!list.length) return null;
-    return h('div', { class: 'stack' }, list.map((a) => h('div', { class: 'banner ' + a.cls, attrs: { role: 'status' } }, h('span', { class: 'dot ' + a.cls }), h('span', { text: a.text }))));
+    const hot = nodes.filter((n) => n.quota && n.quota.percentUsed >= 80);
+    for (const n of hot) {
+      list.push({ state: n.quota.percentUsed >= 95 ? 'bad' : 'warn', title: n.label + ' has used ' + n.quota.percentUsed + '% of its free requests', detail: n.quota.percentUsed >= 95 ? 'The router has moved traffic to your other servers until the limit resets.' : 'At 95% the router moves traffic to your other servers by itself.' });
+    }
+
+    if (s.routerConfig.rateLimit.enabled && s.sharing.rateLimit !== 'shared') {
+      list.push({ state: 'idle', title: 'Rate limit counted per router copy', detail: 'A bot spread over many addresses gets more requests through. Add the RATE_LIMITER binding (see packages/router/wrangler.toml.example).' });
+    }
+    const order = { bad: 0, warn: 1, idle: 2, ok: 3 };
+    return list.sort((a, b) => order[a.state] - order[b.state]);
   }
+  const needsAttention = (s) => todos(s).filter((t) => t.state === 'bad' || t.state === 'warn');
 
   const EVENT_TEXT = {
-    node_down: (e) => e.node + ' went down in ' + e.pool + (e.detail ? ': ' + e.detail : ''),
-    node_up: (e) => e.node + ' recovered in ' + e.pool,
-    failover: (e) => 'Failover: ' + e.node + ' answered for ' + e.pool + (e.detail ? ' (' + e.detail + ')' : ''),
-    outage: (e) => 'No node could answer in ' + e.pool + '; clients got a clean 503',
-    quota_limit: (e) => e.node + ' reached 95% of its free quota in ' + e.pool + '; traffic moved to the next free tier',
+    node_down: (e) => e.node + ' stopped answering' + (e.detail ? ' (' + e.detail + ')' : '') + '. Requests moved to your other servers.',
+    node_up: (e) => e.node + ' is answering again.',
+    failover: (e) => e.node + ' answered after another server failed (' + (e.detail || 'failover') + '). The visitor still got a reply.',
+    outage: (e) => 'No server for ' + e.pool + ' could answer. Visitors got an error.',
+    quota_limit: (e) => e.node + ' reached 95% of its free requests. Traffic moved to your other servers.',
+    paused: (e) => 'You paused ' + e.node + (e.detail ? ' for ' + e.detail : '') + '. Your other servers took its visitors.',
+    resumed: (e) => 'You resumed ' + e.node + '. It gets traffic again.',
   };
-  const EVENT_DOT = { node_down: 'bad', node_up: 'ok', failover: 'warn', outage: 'bad', quota_limit: 'warn' };
+  const EVENT_DOT = { node_down: 'bad', node_up: 'ok', failover: 'warn', outage: 'bad', quota_limit: 'warn', paused: '', resumed: 'ok' };
   const EVENT_FILTERS = [
     ['all', 'All'],
-    ['node_down', 'Down'],
+    ['node_down', 'Stopped'],
     ['node_up', 'Recovered'],
-    ['failover', 'Failovers'],
-    ['quota_limit', 'Quota'],
+    ['failover', 'Backup answered'],
     ['outage', 'Outages'],
+    ['quota_limit', 'Free limits'],
+    ['paused', 'Your actions'],
   ];
 
   function eventList(events, emptyText) {
     if (!events.length) {
-      return h('div', { class: 'empty' }, h('strong', { text: 'All quiet' }), emptyText || 'Failovers, outages and quota switches will appear here.');
+      return h('div', { class: 'empty' }, h('strong', { text: 'Nothing has happened yet' }), emptyText || 'When a server stops, recovers, or a backup answers, it shows up here.');
     }
     return h(
       'div',
@@ -318,7 +481,7 @@
     return h(
       'div',
       null,
-      h('div', { class: 'bar-label' }, h('span', { text: fmt(used) + ' / ' + fmt(limit) + (q.requestsPerDay ? ' per day' : ' per month') }), h('span', { text: q.percentUsed + '%' })),
+      h('div', { class: 'bar-label' }, h('span', { text: fmt(used) + ' of ' + fmt(limit) + (q.requestsPerDay ? ' today' : ' this month') }), h('span', { text: q.percentUsed + '%' })),
       h('div', { class: 'bar', attrs: { role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': q.percentUsed } }, h('span', { class: cls, style: { width: Math.min(100, q.percentUsed) + '%' } }))
     );
   }
@@ -331,61 +494,58 @@
     return h('div', { class: 'card kpi' }, h('div', { class: 'kpi-label' }, iconName ? icon(iconName, 14) : null, label), h('div', { class: 'kpi-value', text: value }), h('div', { class: 'kpi-sub', text: sub || '' }));
   }
 
+  function checkRow(c) {
+    const ic = { ok: 'check', bad: 'x', warn: 'alert', idle: 'minus' }[c.state];
+    return h('div', { class: 'check' }, h('span', { class: 'check-icon ' + c.state }, icon(ic, 13)), h('div', null, h('div', { class: 'check-title', text: c.title }), h('div', { class: 'check-detail', text: c.detail })), h('span'));
+  }
+
+  const kvList = (rows) => h('dl', { class: 'kv' }, rows.map(([k, v]) => [h('dt', { text: k }), h('dd', { text: v })]));
+
   // ---------------------------------------------------------------- pages
 
   const PAGES = {
     overview: {
       title: 'Overview',
-      sub: 'Your API and the servers behind it',
-      group: 'Monitor',
+      sub: 'Is your app up, and what needs your attention',
+      group: 'Your app',
       icon: 'overview',
       render(view, s) {
         const t = s.totals;
-        const nodes = allNodes(s);
-        const down = nodes.filter((n) => n.state === 'down').length;
-        const serving = nodes.filter((n) => nodeState(n) === 'serving').length;
-        const atQuota = nodes.filter((n) => nodeState(n) === 'quota').length;
-        const backups = nodes.filter((n) => nodeState(n) === 'standby').length;
-        const unchecked = nodes.filter((n) => nodeState(n) === 'unchecked').length;
-        const paused = nodes.filter((n) => nodeState(n) === 'paused').length;
         const rate = t.requests ? (t.succeeded / t.requests) * 100 : null;
-
+        const attention = needsAttention(s);
+        const servers = uniqueByUrl(allNodes(s));
         append(view, [
-          banners(s),
-          getItem('local', INTRO_KEY) ? null : firstRunCard(s),
+          hero(s),
+          attention.length
+            ? card('Needs your attention', h('div', { class: 'checklist' }, attention.map(checkRow)), h('a', { href: '#/setup', text: 'Full checklist' }))
+            : null,
           h(
             'div',
-            { class: 'kpis', style: { marginTop: alerts(s).length || !getItem('local', INTRO_KEY) ? '16px' : '0' } },
-            kpi('Requests', fmt(t.requests), fmt(t.rateLimited) + ' rate-limited · ' + fmt(t.rejected) + ' rejected', 'activity'),
-            kpi('Success rate', rate === null ? '–' : rate.toFixed(rate >= 99.95 || rate < 10 ? 1 : 2) + '%', fmt(t.failed) + ' failed', 'check'),
-            kpi('Times a backup answered', fmt(t.failovers), 'a server failed and another one took over', 'routing'),
-            kpi('Response time', s.latency.samples ? ms(s.latency.p95) : '–', s.latency.samples ? '95% of requests were faster than this' : 'no requests yet', 'health'),
-            kpi(
-              'Servers online',
-              serving + backups + atQuota + ' / ' + nodes.length,
-              [down && down + ' offline', paused && paused + ' paused', atQuota && atQuota + ' at free limit', backups && backups + ' backup', unchecked && unchecked + ' not checked yet'].filter(Boolean).join(' · ') || 'all answering',
-              'providers'
-            )
+            { class: 'kpis kpis-4', style: { marginTop: '16px' } },
+            kpi('Requests', fmt(t.requests), 'since this router copy started ' + duration(s.instance.uptimeSeconds) + ' ago', 'activity'),
+            kpi('Answered without error', rate === null ? '–' : rate.toFixed(rate >= 99.95 || rate < 10 ? 1 : 2) + '%', t.requests ? fmt(t.failed) + ' failed' : 'no requests yet', 'check'),
+            kpi('Response time', s.latency.samples ? ms(s.latency.p95) : '–', s.latency.samples ? '95% of requests were faster' : 'no requests yet', 'clock'),
+            kpi('Backup took over', fmt(t.failovers), t.failovers === 1 ? 'time a server failed and another answered' : 'times a server failed and another answered', 'routing')
           ),
-          h('div', { class: 'section-title' }, h('h2', { text: 'Your servers' }), h('span', { class: 'count', text: s.routerConfig.strategy === 'weighted' ? 'traffic is spread across them' : 'the first one answers; the others are backups' })),
-          meshMap(s),
+          h('div', { class: 'section-title' }, h('h2', { text: 'Your servers' }), h('span', { class: 'count', text: s.routerConfig.strategy === 'weighted' ? 'requests are spread across them' : 'the first online one answers; the others wait as backups' }), h('span', { class: 'spacer' }), h('a', { href: '#/servers', text: 'Details' })),
+          h('div', { class: 'server-grid' }, servers.map((n) => serverCard(s, n, { compact: true }))),
           h(
             'div',
             { class: 'grid-2', style: { marginTop: '16px' } },
-            card('Recent incidents', eventList(s.events.slice(0, 6), 'No incidents on this router instance.'), h('a', { href: '#/activity', text: 'View all' })),
-            card('Free-tier usage', freeTierSummary(s), h('a', { href: '#/free-tiers', text: 'Details' }))
+            card('What happened', eventList(s.events.slice(0, 6)), h('a', { href: '#/activity', text: 'All activity' })),
+            appCard(s)
           ),
         ]);
       },
     },
 
-    routing: {
+    servers: {
       title: 'Servers',
-      sub: 'Every server behind your API, and how traffic reaches them',
-      group: 'Monitor',
-      icon: 'routing',
+      sub: 'Every copy of your app, on every cloud',
+      group: 'Your app',
+      icon: 'server',
       badge: (s) => {
-        const down = allNodes(s).filter((n) => n.state === 'down').length;
+        const down = uniqueByUrl(allNodes(s)).filter((n) => n.state === 'down').length;
         return down ? { cls: 'bad', text: String(down) } : null;
       },
       render(view, s) {
@@ -393,156 +553,23 @@
         append(view, [
           h(
             'div',
-            { class: 'grid-3', style: { marginBottom: '16px' } },
-            kpi('How traffic is shared', cfg.strategy === 'weighted' ? 'Spread out' : 'Main first', cfg.strategy === 'weighted' ? 'requests are spread across online servers' : 'the first online server answers; the others are backups'),
+            { class: 'toolbar' },
+            checkButton(s),
+            failoverButton(s),
+            h('span', { class: 'muted small', text: checksLine(s) })
+          ),
+          meshMap(s),
+          s.pools.map((p) => [
+            h('div', { class: 'section-title' }, h('h2', { class: 'mono', text: p.prefix }), h('span', { class: 'count', text: (p.prefix === '/' ? 'every request' : 'requests to ' + p.prefix + '…') + ' · ' + plural(p.nodes.length, 'server') + (p.isDefault ? ' · default route' : '') })),
+            h('div', { class: 'server-grid' }, p.nodes.map((n) => serverCard(s, Object.assign({ pool: p.prefix }, n), { pool: p }))),
+          ]),
+          h('div', { class: 'section-title' }, h('h2', { text: 'How the router picks a server' })),
+          h(
+            'div',
+            { class: 'grid-3' },
+            kpi('Order', cfg.strategy === 'weighted' ? 'Spread out' : 'Main first', cfg.strategy === 'weighted' ? 'requests are spread across online servers' : 'the first online server answers; the others are backups'),
             kpi('Waits for a server', ms(cfg.timeoutMs), 'then tries the next one (up to ' + cfg.maxAttempts + ' servers, ' + ms(cfg.totalBudgetMs) + ' in total)'),
-            kpi('Skips an offline server for', ms(cfg.circuitTtlMs), 'then one request checks if it is back')
-          ),
-          s.pools.map((p) => poolCard(p)),
-        ]);
-      },
-    },
-
-    'free-tiers': {
-      title: 'Free limits',
-      sub: 'How much of each cloud’s free plan you have used',
-      group: 'Monitor',
-      icon: 'gauge',
-      badge: (s) => {
-        const hot = allNodes(s).filter((n) => n.quota && n.quota.percentUsed >= 80).length;
-        return hot ? { cls: 'warn', text: String(hot) } : null;
-      },
-      render(view, s) {
-        const quotaNodes = uniqueByLabel(allNodes(s).filter((n) => n.quota));
-        const others = uniqueByLabel(allNodes(s).filter((n) => !n.quota));
-        const catalogById = new Map((state.catalog || []).map((p) => [p.id, p]));
-
-        append(view, [
-          banners(s),
-          h(
-            'div',
-            { class: 'grid-2', style: { marginTop: alerts(s).length ? '16px' : '0' } },
-            card(
-              'Router ceiling',
-              h(
-                'div',
-                { class: 'card-body stack' },
-                h('div', null, h('div', { class: 'kpi-value', text: '100,000 / day' }), h('div', { class: 'kpi-sub', text: 'Cloudflare Workers Free, shared by all router instances' })),
-                h('p', { class: 'muted', style: { margin: 0 }, text: 'Every request runs the router, including cached ones, so this is the real free ceiling of the mesh. After it, Cloudflare answers with error 1027 until midnight UTC. Adding providers adds CPU and RAM, not requests.' }),
-                h('div', { class: 'muted small', text: 'This router instance has handled ' + fmt(s.totals.requests) + ' requests since it started ' + duration(s.instance.uptimeSeconds) + ' ago.' })
-              )
-            ),
-            card(
-              'How switching works',
-              h(
-                'div',
-                { class: 'card-body' },
-                h(
-                  'ol',
-                  { class: 'steps' },
-                  h('li', { text: 'Each provider with a request quota is counted as traffic flows.' }),
-                  h('li', { text: 'At 80% you get a warning here and on the overview.' }),
-                  h('li', { text: 'At 95% the router stops sending new traffic there and moves to the next free tier, with no errors for users.' }),
-                  h('li', { text: 'Providers limited by hours or bandwidth are switched when they answer 429 or fail.' })
-                )
-              )
-            )
-          ),
-          h('div', { class: 'section-title' }, h('h2', { text: 'Request quotas' }), h('span', { class: 'count', text: quotaNodes.length + ' providers' })),
-          quotaNodes.length
-            ? h(
-                'div',
-                { class: 'card' },
-                h(
-                  'div',
-                  { class: 'table' },
-                  quotaNodes.map((n) =>
-                    h(
-                      'div',
-                      { class: 'tr', style: { gridTemplateColumns: 'minmax(160px, 1fr) 120px minmax(220px, 2fr)' } },
-                      h('div', { class: 'node-cell' }, tile(n.providerId || n.label, n.label, 30), h('div', null, h('div', { class: 'node-name', text: n.label }), h('div', { class: 'muted small', text: 'pools ' + poolsOf(s, n.label).join(', ') }))),
-                      h('div', null, statePill(n)),
-                      quotaBar(n.quota)
-                    )
-                  )
-                )
-              )
-            : h('div', { class: 'card empty' }, h('strong', { text: 'No request quotas configured' }), 'Run omnimesh init, or add requestsPerDay / requestsPerMonth to a node in the config.'),
-          others.length
-            ? [
-                h('div', { class: 'section-title' }, h('h2', { text: 'Other free-tier limits' }), h('span', { class: 'count', text: 'not counted by requests' })),
-                h(
-                  'div',
-                  { class: 'card' },
-                  h(
-                    'div',
-                    { class: 'table' },
-                    others.map((n) => {
-                      const p = catalogById.get(n.providerId);
-                      return h(
-                        'div',
-                        { class: 'tr', style: { gridTemplateColumns: 'minmax(160px, 1fr) 120px minmax(220px, 2fr)' } },
-                        h('div', { class: 'node-cell' }, tile(n.providerId || n.label, n.label, 30), h('div', { class: 'node-name', text: n.label })),
-                        h('div', null, statePill(n)),
-                        h('div', { class: 'muted', text: p ? limitsSummary(p.limits) || 'See the provider pricing page' : 'Unknown provider (no providerId in config)' })
-                      );
-                    })
-                  )
-                ),
-              ]
-            : null,
-        ]);
-      },
-    },
-
-    health: {
-      title: 'Health',
-      sub: 'Latency, failures and shared state',
-      group: 'Monitor',
-      icon: 'health',
-      render(view, s) {
-        const t = s.totals;
-        const cfg = s.routerConfig;
-        const kv = (rows) => h('dl', { class: 'kv' }, rows.map(([k, v]) => [h('dt', { text: k }), h('dd', { text: v })]));
-        append(view, [
-          h(
-            'div',
-            { class: 'kpis' },
-            kpi('Uptime', duration(s.instance.uptimeSeconds), 'this router instance'),
-            kpi('Version', 'v' + s.version, s.profile + ' profile'),
-            kpi('Requests', fmt(t.requests), fmt(t.succeeded) + ' succeeded'),
-            kpi('Failed', fmt(t.failed), t.requests ? ((t.failed / t.requests) * 100).toFixed(2) + '% of requests' : 'no requests yet'),
-            kpi('Failovers', fmt(t.failovers), 'answered by another node')
-          ),
-          h(
-            'div',
-            { class: 'grid-3', style: { marginTop: '16px' } },
-            card('Latency', h('div', { class: 'card-body' }, kv([['p50', ms(s.latency.p50)], ['p95', ms(s.latency.p95)], ['p99', ms(s.latency.p99)], ['Samples', fmt(s.latency.samples)]]))),
-            card('Protection', h('div', { class: 'card-body' }, kv([['Rate limit', cfg.rateLimit.enabled ? cfg.rateLimit.requestsPerMinute + ' / min per IP and caller' : 'off'], ['Rate-limited', fmt(t.rateLimited)], ['Max body', bytes(cfg.maxBodyBytes)], ['Rejected bodies', fmt(t.rejected)]]))),
-            card('Failover settings', h('div', { class: 'card-body' }, kv([['Timeout per node', ms(cfg.timeoutMs)], ['Max attempts', String(cfg.maxAttempts)], ['Total budget', ms(cfg.totalBudgetMs)], ['Dead-node pause', ms(cfg.circuitTtlMs)]])))
-          ),
-          h('div', { class: 'section-title' }, h('h2', { text: 'Shared state' }), h('span', { class: 'count', text: 'what every router instance agrees on' })),
-          h('div', { class: 'card' }, h('div', { class: 'checklist' }, sharedChecks(s).map(checkRow))),
-          h('div', { class: 'section-title' }, h('h2', { text: 'Node error rates' })),
-          h(
-            'div',
-            { class: 'card' },
-            h(
-              'div',
-              { class: 'table' },
-              h('div', { class: 'tr th', style: { gridTemplateColumns: 'minmax(160px,1.4fr) 120px 1fr 1fr 1fr' } }, ['Node', 'Status', 'Requests', 'Errors', 'Last latency'].map((x) => h('div', { text: x }))),
-              uniqueByLabel(allNodes(s)).map((n) =>
-                h(
-                  'div',
-                  { class: 'tr', style: { gridTemplateColumns: 'minmax(160px,1.4fr) 120px 1fr 1fr 1fr' } },
-                  h('div', { class: 'node-cell' }, stateDot(n), h('span', { class: 'node-name', text: n.label })),
-                  h('div', null, statePill(n)),
-                  h('div', { class: 'num', text: fmt(n.requests) }),
-                  h('div', { class: 'num', text: fmt(n.errors) + (n.requests ? ' (' + Math.round((n.errors / n.requests) * 100) + '%)' : '') }),
-                  h('div', { class: 'num', text: ms(n.latencyMs) })
-                )
-              )
-            )
+            kpi('Skips a failed server for', ms(cfg.circuitTtlMs), 'then one request checks if it is back')
           ),
         ]);
       },
@@ -550,13 +577,14 @@
 
     activity: {
       title: 'Activity',
-      sub: 'Failures, recoveries, failovers and quota switches',
-      group: 'Monitor',
+      sub: 'What happened, in plain words',
+      group: 'Your app',
       icon: 'activity',
       render(view, s) {
         const counts = {};
-        for (const e of s.events) counts[e.kind] = (counts[e.kind] || 0) + 1;
-        const filtered = state.eventFilter === 'all' ? s.events : s.events.filter((e) => e.kind === state.eventFilter);
+        for (const e of s.events) counts[e.kind === 'resumed' ? 'paused' : e.kind] = (counts[e.kind === 'resumed' ? 'paused' : e.kind] || 0) + 1;
+        const matches = (e) => state.eventFilter === 'all' || e.kind === state.eventFilter || (state.eventFilter === 'paused' && e.kind === 'resumed');
+        const filtered = s.events.filter(matches);
         append(view, [
           h(
             'div',
@@ -582,8 +610,162 @@
               )
             )
           ),
-          h('div', { class: 'card' }, eventList(filtered, state.eventFilter === 'all' ? undefined : 'No events of this kind on this router instance.')),
-          h('p', { class: 'muted small', text: 'Repeats within 5 seconds are grouped (×N). The last 50 events of this router instance are kept.' }),
+          h('div', { class: 'card' }, eventList(filtered, state.eventFilter === 'all' ? undefined : 'Nothing of this kind on this router copy.')),
+          h('p', { class: 'muted small', text: 'Shows what this copy of the router saw since it started ' + duration(s.instance.uptimeSeconds) + ' ago (Cloudflare runs several copies; each keeps its own list). Repeats within 5 seconds are grouped as ×N.' }),
+        ]);
+      },
+    },
+
+    traffic: {
+      title: 'Traffic',
+      sub: 'Requests, speed and protection',
+      group: 'Your app',
+      icon: 'health',
+      render(view, s) {
+        const t = s.totals;
+        const cfg = s.routerConfig;
+        append(view, [
+          h(
+            'div',
+            { class: 'kpis kpis-4' },
+            kpi('Requests', fmt(t.requests), fmt(t.succeeded) + ' answered without error'),
+            kpi('Failed', fmt(t.failed), t.requests ? ((t.failed / t.requests) * 100).toFixed(2) + '% of requests' : 'no requests yet'),
+            kpi('Blocked', fmt(t.rateLimited + t.rejected), fmt(t.rateLimited) + ' too many requests · ' + fmt(t.rejected) + ' too large'),
+            kpi('Backup took over', fmt(t.failovers), 'another server answered')
+          ),
+          h(
+            'div',
+            { class: 'grid-3', style: { marginTop: '16px' } },
+            card('Response time', h('div', { class: 'card-body' }, s.latency.samples ? kvList([['Half of requests under', ms(s.latency.p50)], ['95% under', ms(s.latency.p95)], ['99% under', ms(s.latency.p99)], ['Measured', plural(s.latency.samples, 'request')]]) : h('p', { class: 'muted', style: { margin: 0 }, text: 'No requests yet on this router copy.' }))),
+            card('Protection', h('div', { class: 'card-body' }, kvList([['Rate limit', cfg.rateLimit.enabled ? cfg.rateLimit.requestsPerMinute + ' per minute per visitor' : 'off'], ['Largest request', bytes(cfg.maxBodyBytes)], ['Shared rate limit', s.sharing.rateLimit === 'shared' ? 'yes' : 'per router copy']]))),
+            card('When a server fails', h('div', { class: 'card-body' }, kvList([['Wait per server', ms(cfg.timeoutMs)], ['Servers tried', 'up to ' + cfg.maxAttempts], ['Longest total wait', ms(cfg.totalBudgetMs)], ['Skip a failed server for', ms(cfg.circuitTtlMs)]])))
+          ),
+          h('div', { class: 'section-title' }, h('h2', { text: 'Per server' }), h('span', { class: 'count', text: 'requests this router copy sent to each' })),
+          h(
+            'div',
+            { class: 'card' },
+            h(
+              'div',
+              { class: 'table' },
+              h('div', { class: 'tr th', style: { gridTemplateColumns: 'minmax(160px,1.4fr) 150px 1fr 1fr 1fr' } }, ['Server', 'Status', 'Requests', 'Errors', 'Last response'].map((x) => h('div', { text: x }))),
+              uniqueByUrl(allNodes(s)).map((n) =>
+                h(
+                  'div',
+                  { class: 'tr', style: { gridTemplateColumns: 'minmax(160px,1.4fr) 150px 1fr 1fr 1fr' } },
+                  h('div', { class: 'node-cell' }, stateDot(n), h('span', { class: 'node-name', text: n.label })),
+                  h('div', null, statePill(n)),
+                  h('div', { class: 'num', text: fmt(n.requests) }),
+                  h('div', { class: 'num', text: fmt(n.errors) + (n.requests ? ' (' + Math.round((n.errors / n.requests) * 100) + '%)' : '') }),
+                  h('div', { class: 'num', text: ms(n.latencyMs) })
+                )
+              )
+            )
+          ),
+          h('p', { class: 'muted small', text: 'Counts are for this copy of the router since it started ' + duration(s.instance.uptimeSeconds) + ' ago. Cloudflare runs several copies, so totals across all of them are higher.' }),
+        ]);
+      },
+    },
+
+    'free-tiers': {
+      title: 'Free limits',
+      sub: 'How much of each cloud’s free plan you have used',
+      group: 'Your app',
+      icon: 'gauge',
+      badge: (s) => {
+        const hot = uniqueByUrl(allNodes(s)).filter((n) => n.quota && n.quota.percentUsed >= 80).length;
+        return hot ? { cls: 'warn', text: String(hot) } : null;
+      },
+      render(view, s) {
+        const servers = uniqueByUrl(allNodes(s));
+        append(view, [
+          h(
+            'div',
+            { class: 'grid-2' },
+            card(
+              'Router: Cloudflare Workers Free',
+              h(
+                'div',
+                { class: 'card-body stack' },
+                h('div', null, h('div', { class: 'kpi-value', text: '100,000 / day' }), h('div', { class: 'kpi-sub', text: 'requests, shared by every copy of the router' })),
+                h('p', { class: 'muted', style: { margin: 0 }, text: 'Every request to your app runs the router, so this is how many requests your app can take per day for free. After that, Cloudflare answers with error 1027 until midnight UTC. Workers Paid ($5/month) raises it to 10 million per month.' })
+              )
+            ),
+            card(
+              'How OmniMesh stays inside free plans',
+              h(
+                'div',
+                { class: 'card-body' },
+                h(
+                  'ol',
+                  { class: 'steps' },
+                  h('li', { text: 'Clouds with a request limit are counted as traffic flows.' }),
+                  h('li', { text: 'At 80% you get a warning here and on the overview.' }),
+                  h('li', { text: 'At 95% the router sends new traffic to your other servers, with no errors for visitors.' }),
+                  h('li', { text: 'Clouds limited by hours or bandwidth are switched when they refuse requests (429) or fail.' })
+                )
+              )
+            )
+          ),
+          h('div', { class: 'section-title' }, h('h2', { text: 'Your clouds' })),
+          h(
+            'div',
+            { class: 'card' },
+            h(
+              'div',
+              { class: 'table' },
+              servers.map((n) => {
+                const p = n.providerId && catalogEntry(n.providerId);
+                return h(
+                  'div',
+                  { class: 'tr', style: { gridTemplateColumns: 'minmax(160px, 1fr) 150px minmax(220px, 2fr)' } },
+                  h('div', { class: 'node-cell' }, tile(n.providerId || n.label, n.label, 30), h('div', null, h('div', { class: 'node-name', text: n.label }), p ? h('div', { class: 'muted small', text: p.requiresCard ? 'card on file' : 'no card' }) : null)),
+                  h('div', null, statePill(n)),
+                  n.quota
+                    ? quotaBar(n.quota)
+                    : h('div', { class: 'muted', text: p ? (limitsSummary(p.limits) || 'See the cloud’s pricing page') + ' (not counted in requests)' : 'Unknown cloud (no providerId in the config)' })
+                );
+              })
+            )
+          ),
+          h('p', { class: 'muted small', text: 'Request counts are kept by this router copy. Limits come from each cloud’s pricing page; the date they were last checked is on the Clouds page.' }),
+        ]);
+      },
+    },
+
+    setup: {
+      title: 'Checklist',
+      sub: 'What is set up, what is missing, and how to fix it',
+      group: 'Set up',
+      icon: 'setup',
+      badge: (s) => {
+        const open = needsAttention(s).length;
+        return open ? { cls: todos(s)[0].state === 'bad' ? 'bad' : 'warn', text: String(open) } : null;
+      },
+      keepsInput: true,
+      render(view, s) {
+        if (!state.builder) state.builder = builderFromStatus(s);
+        if (state.pendingBuilderAdd) {
+          addBuilderNode(state.pendingBuilderAdd);
+          state.pendingBuilderAdd = null;
+        }
+        const checks = todos(s);
+        const done = checks.filter((c) => c.state === 'ok').length;
+        append(view, [
+          card('Your setup', h('div', { class: 'checklist' }, checks.map(checkRow)), h('span', { class: 'pill ' + (done === checks.length ? 'ok' : 'accent'), text: done + ' of ' + checks.length + ' done' })),
+          h(
+            'div',
+            { style: { marginTop: '16px' } },
+            card(
+              'Add a cloud, change settings or ship new code',
+              h(
+                'div',
+                { class: 'card-body stack' },
+                h('p', { style: { margin: 0 } }, 'In your project folder, run ', h('code', { text: 'omnimesh up' }), ' to add a cloud or change your app’s settings, and ', h('code', { text: 'omnimesh deploy' }), ' to ship your latest code to every cloud.'),
+                h('p', { class: 'muted small', style: { margin: 0 }, text: 'This dashboard runs on Cloudflare and never holds your cloud keys, so those changes happen on your computer.' })
+              )
+            )
+          ),
+          h('details', { class: 'advanced' }, h('summary', { text: 'Advanced: write the config by hand' }), h('p', { class: 'muted small', text: 'Builds an omnimesh.config.yaml for servers you deployed yourself. Nothing is saved on the router.' }), builderView()),
         ]);
       },
     },
@@ -591,12 +773,12 @@
     providers: {
       title: 'Clouds',
       sub: 'Free clouds you can host your backend on',
-      group: 'Build',
+      group: 'Set up',
       icon: 'providers',
       keepsInput: true,
       render(view, s) {
         if (!state.catalog) {
-          view.appendChild(h('div', { class: 'card empty', text: 'Loading the provider catalog…' }));
+          view.appendChild(h('div', { class: 'card empty', text: 'Loading the list of clouds…' }));
           return;
         }
         const usage = meshUsage(s);
@@ -604,19 +786,19 @@
           ['all', 'All', () => true],
           ['no-card', 'No card needed', (p) => !p.requiresCard && p.tier === 'free'],
           ['card', 'Needs a card', (p) => p.requiresCard && p.tier === 'free'],
-          ['in-mesh', 'In your mesh', (p) => usage.has(p.id)],
+          ['in-mesh', 'You use', (p) => usage.has(p.id)],
         ];
         const search = h('input', {
           type: 'search',
-          placeholder: 'Search providers or roles',
+          placeholder: 'Search clouds or roles',
           value: state.providerSearch,
-          attrs: { 'aria-label': 'Search providers' },
+          attrs: { 'aria-label': 'Search clouds' },
           oninput: (e) => {
             state.providerSearch = e.target.value;
             drawGrid();
           },
         });
-        const chipBox = h('div', { class: 'chips', attrs: { role: 'group', 'aria-label': 'Filter providers' } });
+        const chipBox = h('div', { class: 'chips', attrs: { role: 'group', 'aria-label': 'Filter clouds' } });
         const gridBox = h('div');
 
         function drawChips() {
@@ -656,10 +838,10 @@
             const items = shown.filter(test2);
             if (!items.length) continue;
             any = true;
-            gridBox.appendChild(h('div', { class: 'section-title' }, h('h2', { text: title }), h('span', { class: 'count', text: items.length + ' providers' })));
+            gridBox.appendChild(h('div', { class: 'section-title' }, h('h2', { text: title }), h('span', { class: 'count', text: plural(items.length, 'cloud') })));
             gridBox.appendChild(h('div', { class: 'provider-grid' }, items.map((p) => providerCard(p, usage.get(p.id)))));
           }
-          if (!any) gridBox.appendChild(h('div', { class: 'card empty' }, h('strong', { text: 'No providers match' }), 'Try another search or filter.'));
+          if (!any) gridBox.appendChild(h('div', { class: 'card empty' }, h('strong', { text: 'No clouds match' }), 'Try another search or filter.'));
         }
 
         drawChips();
@@ -669,48 +851,13 @@
       },
     },
 
-    setup: {
-      title: 'Add or change servers',
-      sub: 'What is set up, what is missing, and how to change it',
-      group: 'Build',
-      icon: 'setup',
-      badge: (s) => {
-        const open = setupChecks(s).filter((c) => c.state === 'bad').length;
-        return open ? { cls: 'bad', text: String(open) } : null;
-      },
-      keepsInput: true,
-      render(view, s) {
-        if (!state.builder) state.builder = builderFromStatus(s);
-        if (state.pendingBuilderAdd) {
-          addBuilderNode(state.pendingBuilderAdd);
-          state.pendingBuilderAdd = null;
-        }
-        const checks = setupChecks(s);
-        const done = checks.filter((c) => c.state === 'ok').length;
-        append(view, [
-          card('Your setup', h('div', { class: 'checklist' }, checks.map(checkRow)), h('span', { class: 'pill ' + (done === checks.length ? 'ok' : 'accent'), text: done + ' of ' + checks.length + ' done' })),
-          card(
-            'Add a cloud, change settings or ship new code',
-            h(
-              'div',
-              { class: 'card-body stack' },
-              h('p', { style: { margin: 0 } }, 'In your project folder, run ', h('code', { text: 'omnimesh up' }), '. It shows your current servers and lets you add a cloud, change your app’s settings, or redeploy the latest code to every cloud.'),
-              h('p', { class: 'muted small', style: { margin: 0 }, text: 'This dashboard runs on Cloudflare and never holds your cloud keys, so those changes happen on your computer.' })
-            )
-          ),
-          h('details', { class: 'advanced' }, h('summary', { text: 'Advanced: edit the config by hand' }), h('p', { class: 'muted small', text: 'Builds an omnimesh.config.yaml for servers you deployed yourself. Nothing is saved on the router.' }), builderView()),
-        ]);
-      },
-    },
-
     settings: {
       title: 'Settings',
-      sub: 'Router configuration, appearance and session',
+      sub: 'Router settings, appearance and sign-in',
       group: 'System',
       icon: 'settings',
       render(view, s) {
         const cfg = s.routerConfig;
-        const kv = (rows) => h('dl', { class: 'kv' }, rows.map(([k, v]) => [h('dt', { text: k }), h('dd', { text: v })]));
         const theme = getItem('local', THEME_KEY) || 'system';
         append(view, [
           h(
@@ -721,17 +868,16 @@
               h(
                 'div',
                 { class: 'card-body stack' },
-                kv([
-                  ['Domain', s.domain],
-                  ['Profile', s.profile],
-                  ['Strategy', cfg.strategy],
-                  ['Default pool', cfg.defaultPool || 'none (unmatched paths get 404)'],
-                  ['Timeout per node', ms(cfg.timeoutMs)],
-                  ['Total budget', ms(cfg.totalBudgetMs)],
-                  ['Max body', bytes(cfg.maxBodyBytes)],
-                  ['Keep-alive pings', s.keepAlive.enabled ? 'on' : 'off'],
+                kvList([
+                  ['Address', s.domain],
+                  ['Order', cfg.strategy === 'weighted' ? 'spread out' : 'main first'],
+                  ['Default route', cfg.defaultPool || 'none (unknown paths get 404)'],
+                  ['Wait per server', ms(cfg.timeoutMs)],
+                  ['Longest total wait', ms(cfg.totalBudgetMs)],
+                  ['Largest request', bytes(cfg.maxBodyBytes)],
+                  ['Keep sleeping servers awake', s.keepAlive.enabled ? 'on' : 'off'],
                 ]),
-                h('p', { class: 'muted small', style: { margin: 0 }, text: 'These come from the router config (OMNIMESH_CONFIG_YAML). Change them with the Setup page builder or in omnimesh.config.yaml, then redeploy the router.' })
+                h('p', { class: 'muted small', style: { margin: 0 }, text: 'These come from the router config. Change them with omnimesh up, or in omnimesh.config.yaml followed by omnimesh deploy.' })
               )
             ),
             h(
@@ -752,15 +898,15 @@
                 )
               ),
               card(
-                'Session',
+                'Sign-in',
                 h(
                   'div',
                   { class: 'card-body stack' },
-                  h('p', { class: 'muted', style: { margin: 0 }, text: 'Your status token is kept in this browser tab only and is cleared when you sign out or close the tab.' }),
+                  h('p', { class: 'muted', style: { margin: 0 }, text: 'Your sign-in key is kept in this browser tab only and is cleared when you sign out or close the tab. To change it, run omnimesh token --rotate in your project folder.' }),
                   h('div', null, h('button', { class: 'btn', type: 'button', onclick: signOut }, icon('logout', 15), 'Sign out'))
                 )
               ),
-              card('About', h('div', { class: 'card-body' }, kv([['OmniMesh', 'v' + s.version], ['Instance started', new Date(s.instance.startedAt).toLocaleString()]])))
+              card('About', h('div', { class: 'card-body' }, kvList([['OmniMesh', 'v' + s.version], ['This router copy started', new Date(s.instance.startedAt).toLocaleString()]])))
             )
           ),
         ]);
@@ -768,95 +914,209 @@
     },
   };
 
-  const ROUTE_ORDER = ['overview', 'routing', 'free-tiers', 'health', 'activity', 'providers', 'setup', 'settings'];
+  const ROUTE_ORDER = ['overview', 'servers', 'activity', 'traffic', 'free-tiers', 'setup', 'providers', 'settings'];
+  /** Old links keep working */
+  const ROUTE_ALIASES = { routing: 'servers', health: 'traffic' };
 
   // ---------------------------------------------------------------- page parts
 
-  /** Shown until the first request: explains the screen and offers a real test request. */
-  function firstRunCard(s) {
-    // The overview redraws every few seconds, so the result lives in state, not in the element
-    const result = h('div', { class: 'muted small', attrs: { 'aria-live': 'polite' }, text: state.testResult || '' });
-    const show = (text) => {
-      state.testResult = text;
-      result.textContent = text;
-    };
-    const path = s.pools[0] ? s.pools[0].healthPath || (s.pools[0].prefix === '/' ? '/' : s.pools[0].prefix) : '/';
-    const send = h('button', {
-      class: 'btn btn-primary',
-      type: 'button',
-      onclick: async () => {
-        send.disabled = true;
-        show('Sending a real request to ' + location.origin + path + ' …');
-        const t0 = performance.now();
-        try {
-          const res = await fetch(path, { cache: 'no-store', credentials: 'omit' });
-          const took = Math.round(performance.now() - t0);
-          const node = res.headers.get('X-Omni-Node');
-          show(res.status < 500
-            ? '✓ Your app answered (status ' + res.status + ') from ' + (node || 'a server') + ' in ' + took + ' ms.'
-            : '✗ Your app answered with an error (status ' + res.status + '). Open that cloud’s dashboard and check the app’s logs.');
-        } catch (e) {
-          show('✗ The request did not get through: ' + e.message);
-        }
-        send.disabled = false;
-        poll();
+  function checksLine(s) {
+    if (state.checking) return 'Checking every server… a sleeping free server can take up to a minute to wake up.';
+    if (!s.checks.lastAt) return 'No health check has run yet.';
+    return 'Last health check ' + ago(Date.parse(s.checks.lastAt)) + (s.checks.lastTrigger === 'schedule' ? ' (automatic, every 5 minutes)' : ' (you asked)') + '.';
+  }
+
+  function checkButton(s, primary) {
+    return h(
+      'button',
+      { class: 'btn' + (primary ? ' btn-primary' : ''), type: 'button', disabled: state.checking, onclick: () => checkNow() },
+      icon('refresh', 15),
+      state.checking ? 'Checking…' : 'Check now'
+    );
+  }
+
+  function failoverButton(s) {
+    const possible = s.pools.some((p) => p.nodes.length >= 2);
+    return h(
+      'button',
+      {
+        class: 'btn',
+        type: 'button',
+        disabled: state.failoverRunning,
+        title: possible ? 'Pause the server that answers, check another cloud takes over, then resume it' : 'Needs at least two servers',
+        onclick: () => openFailoverTest(),
       },
-    }, 'Send a test request');
+      icon('zap', 15),
+      state.failoverRunning ? 'Testing failover…' : 'Test failover'
+    );
+  }
+
+  function hero(s) {
+    const v = verdict(s);
+    return h(
+      'section',
+      { class: 'card hero hero-' + v.cls },
+      h('div', { class: 'hero-icon' }, icon(v.icon, 26)),
+      h(
+        'div',
+        { class: 'hero-main' },
+        h('h2', { class: 'hero-title', text: v.title }),
+        h('p', { class: 'hero-text', text: v.text }),
+        h(
+          'div',
+          { class: 'hero-actions' },
+          checkButton(s, v.cls === 'idle'),
+          failoverButton(s),
+          h('a', { class: 'btn', href: location.origin + '/', target: '_blank', rel: 'noopener noreferrer' }, icon('external', 14), 'Open my app'),
+          h('button', { class: 'btn btn-ghost', type: 'button', onclick: openGlossary }, icon('help', 14), 'What do the words mean?')
+        ),
+        h('div', { class: 'hero-meta muted small', text: checksLine(s) + (state.lastAction ? ' ' + state.lastAction : '') })
+      )
+    );
+  }
+
+  function serverCard(s, n, opts) {
+    const st = nodeState(n);
+    const v = STATE_VIEW[st];
+    const p = n.providerId && catalogEntry(n.providerId);
+    const pool = (opts && opts.pool) || s.pools.find((x) => x.nodes.some((m) => m.url === n.url));
+    const firstPrimary = pool ? pool.nodes.find((m) => !m.isBackup) : null;
+    const roleText = n.isBackup
+      ? 'Backup'
+      : s.routerConfig.strategy === 'weighted'
+        ? 'Shares the load' + (n.weight > 1 ? ' ×' + n.weight : '')
+        : firstPrimary && firstPrimary.url === n.url
+          ? 'Main server'
+          : 'Next in line';
+    const lock =
+      n.lock === 'locked'
+        ? h('span', { class: 'pill ok', title: 'Refuses requests that did not come through your router' }, icon('shield', 12), 'Locked')
+        : n.lock === 'open'
+          ? h('span', { class: 'pill warn', title: 'Anyone with its address can skip the router. Add gatewayAuth() from @omnimesh/node.' }, icon('alert', 12), 'Not locked')
+          : null;
+    const check = n.check;
+    const lastSeen = n.lastChecked ? ago(n.lastChecked) : 'never';
+    const facts = [
+      ['Response', ms(n.latencyMs != null ? n.latencyMs : check && check.latencyMs)],
+      ['Last seen', lastSeen],
+    ];
+    if (!(opts && opts.compact)) {
+      facts.push(['Requests', fmt(n.requests)], ['Errors', fmt(n.errors)]);
+    }
+    let note = null;
+    if (st === 'down' || st === 'error') note = h('div', { class: 'server-note bad', text: n.failureReason || 'no answer' });
+    else if (st === 'paused') note = h('div', { class: 'server-note', text: 'No traffic until ' + clockTime(n.pausedUntil) + '. It still answers if every other server fails.' });
+    else if (st === 'unchecked' && n.checkable === false) note = h('div', { class: 'server-note', text: 'Not checked: one check covers your first 20 servers (Cloudflare allows 50 outgoing requests per run). Live traffic still shows if it answers.' });
+    else if (st === 'unchecked' && n.sleepsIfIdle) note = h('div', { class: 'server-note', text: 'Free ' + cloudName(n) + ' servers sleep when idle, so automatic checks skip it (they would keep it awake). Check now wakes it.' });
+
+    const actions = [];
+    if (st === 'paused') {
+      actions.push(h('button', { class: 'btn btn-sm', type: 'button', onclick: () => resumeNode(pool.prefix, n.label) }, icon('play', 13), 'Resume now'));
+    } else if (pool && pool.nodes.some((m) => m.url !== n.url && m.state !== 'paused' && m.state !== 'down')) {
+      // Same rule as the router: never offer a pause that would leave the route without a working server
+      actions.push(h('button', { class: 'btn btn-sm', type: 'button', onclick: () => confirmPause(pool.prefix, n) }, icon('pause', 13), 'Pause 60 s'));
+    }
+
+    return h(
+      'article',
+      { class: 'server-card state-' + v.cls },
+      h(
+        'div',
+        { class: 'server-top' },
+        tile(n.providerId || n.label, p ? p.displayName : n.label, 36),
+        h('div', { class: 'ellipsis' }, h('div', { class: 'node-name', text: n.label }), h('div', { class: 'node-url', text: hostOf(n.url), title: n.url })),
+        h('span', { class: 'spacer' }),
+        statePill(n)
+      ),
+      h('div', { class: 'server-tags' }, h('span', { class: 'role', text: roleText }), lock, p ? h('span', { class: 'role', text: p.requiresCard ? 'card on file' : 'free, no card' }) : null),
+      h('dl', { class: 'server-facts' }, facts.map(([k, val]) => h('div', null, h('dt', { text: k }), h('dd', { text: val })))),
+      n.quota ? quotaBar(n.quota) : null,
+      note,
+      actions.length ? h('div', { class: 'server-actions' }, actions) : null
+    );
+  }
+
+  function appCard(s) {
+    const a = s.app;
+    if (!a) {
+      return card(
+        'Your app',
+        h(
+          'div',
+          { class: 'card-body stack' },
+          kvList([['Address', location.origin], ['Servers', plural(uniqueByUrl(allNodes(s)).length, 'server')]]),
+          h('p', { class: 'muted small', style: { margin: 0 }, text: 'These servers were set up by hand, so the router does not know which code they run. Deploy with omnimesh up to see your repository and deploy time here.' })
+        )
+      );
+    }
+    const runtime = { node: 'Node.js', python: 'Python', docker: 'Docker' }[a.runtime] || a.runtime;
     return card(
-      'What you’re looking at',
+      'Your app',
       h(
         'div',
         { class: 'card-body stack' },
-        h('p', { style: { margin: 0 } }, 'Your API is live at ', h('strong', { text: location.origin }), '. Every request to it goes to one of your servers below. If a server stops answering, the next one takes over automatically.'),
+        kvList([
+          ['Address', location.origin],
+          ['Code', a.repo + ' (' + a.branch + ')'],
+          ['Kind', runtime],
+          ['Last deployed', a.deployedAt ? new Date(a.deployedAt).toLocaleString() : 'unknown'],
+        ]),
         h(
           'div',
           { class: 'toolbar', style: { margin: 0 } },
-          send,
-          h('button', { class: 'btn', type: 'button', onclick: openGlossary }, 'What do these words mean?'),
-          h('button', { class: 'btn', type: 'button', onclick: () => { setItem('local', INTRO_KEY, '1'); renderPage(); } }, 'Got it')
-        ),
-        result
+          a.repoUrl ? h('a', { class: 'btn btn-sm', href: a.repoUrl, target: '_blank', rel: 'noopener noreferrer' }, icon('git', 13), 'Repository') : null,
+          h('span', { class: 'muted small' }, 'Ship new code: ', h('code', { text: 'omnimesh deploy' }))
+        )
       )
     );
   }
 
   const GLOSSARY = [
-    ['Server', 'One copy of your backend, running on one cloud (for example Koyeb or Render).'],
-    ['Route', 'A part of your API, like /api or /auth. Each route has its own list of servers.'],
-    ['Backup, ready', 'Online and waiting. It answers when the servers before it can’t.'],
-    ['Offline', 'Did not answer. The router skips it for a short time, then checks it again.'],
-    ['Free limit reached', 'This cloud’s free plan is nearly used up, so traffic moves to the next cloud.'],
-    ['Times a backup answered', 'How often a server failed and another one answered instead. Your users still got a reply.'],
+    ['Server', 'One copy of your app, running on one cloud (for example Koyeb or Render). OmniMesh runs the same app on several clouds.'],
+    ['Router', 'The small program on Cloudflare that owns your one address and picks a server for every request.'],
+    ['Route', 'A part of your app’s address, like / or /api. Each route has its own list of servers.'],
+    ['Main server / Backup', 'The main server answers first. A backup answers when the servers before it can’t.'],
+    ['Not answering', 'The server did not reply, timed out, or its cloud said it is unavailable. The router skips it and tries it again a little later.'],
+    ['Answering with errors', 'The server replied, but its health check said something is wrong (status 500), for example it cannot reach its database.'],
+    ['Paused', 'You asked the router to skip this server for a short time (up to 5 minutes). It comes back by itself.'],
+    ['Check now', 'Asks every server right away whether it is answering, and whether it is locked.'],
+    ['Test failover', 'Pauses the server that is answering, sends real requests to your app, shows which cloud took over, and resumes it.'],
+    ['Locked / Not locked', 'A locked server refuses requests that did not come through your router, so nobody can skip its protection.'],
+    ['Backup took over', 'How often a server failed and another one answered instead. Your visitors still got a reply.'],
     ['Response time', 'How long requests take. 95% of requests were faster than the number shown.'],
-    ['Router', 'The small program on Cloudflare that owns your one URL and picks a server for every request.'],
-    ['Sign-in key', 'The password for this dashboard (OMNIMESH_STATUS_TOKEN in your .env).'],
-    ['Locked / Not locked', 'Locked servers only accept requests that come through your router, so nobody can skip it.'],
+    ['Sign-in key', 'The password for this dashboard (OMNIMESH_STATUS_TOKEN in your project’s .env).'],
   ];
 
-  function openGlossary() {
+  function openDrawer(title, bodyChildren, opts) {
     const root = $('drawer-root');
+    const previouslyFocused = document.activeElement;
     const close = () => {
       clear(root);
       document.removeEventListener('keydown', onKey);
+      if (opts && opts.onClose) opts.onClose();
+      if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
     };
     const onKey = (e) => e.key === 'Escape' && close();
     document.addEventListener('keydown', onKey);
     const closeBtn = h('button', { class: 'icon-btn', type: 'button', onclick: close, attrs: { 'aria-label': 'Close' } }, icon('x', 18));
+    const body = h('div', { class: 'drawer-body' }, bodyChildren);
     append(clear(root), [
       h('div', { class: 'drawer-scrim', onclick: close }),
-      h('aside', { class: 'drawer', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'What the words mean' } },
-        h('div', { class: 'drawer-head' }, h('h2', { text: 'What the words mean' }), closeBtn),
-        h('div', { class: 'drawer-body' }, h('dl', { class: 'glossary' }, GLOSSARY.map(([term, text]) => [h('dt', { text: term }), h('dd', { text })])))
-      ),
+      h('aside', { class: 'drawer', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-label': title } }, h('div', { class: 'drawer-head' }, (opts && opts.lead) || null, h('h2', { text: title }), closeBtn), body),
     ]);
     closeBtn.focus();
+    return { close, body };
+  }
+
+  function openGlossary() {
+    openDrawer('What the words mean', h('dl', { class: 'glossary' }, GLOSSARY.map(([term, text]) => [h('dt', { text: term }), h('dd', { text })])));
   }
 
   function meshMap(s) {
     return h(
       'div',
       { class: 'card card-body mesh' },
-      h('div', { class: 'mesh-entry' }, 'Your users', icon('arrow', 14), h('span', { class: 'mesh-node-router' }, icon('globe', 14), s.domain), icon('arrow', 14), 'your servers'),
+      h('div', { class: 'mesh-entry' }, 'Your visitors', icon('arrow', 14), h('span', { class: 'mesh-node-router' }, icon('globe', 14), s.domain), icon('arrow', 14), 'your servers'),
       s.pools.map((p) =>
         h(
           'div',
@@ -866,52 +1126,14 @@
           h(
             'div',
             { class: 'mesh-chips' },
-            p.nodes.map((n) => h('span', { class: 'chip', title: n.url }, stateDot(n), n.label, h('span', { class: 'chip-sub', text: STATE_VIEW[nodeState(n)].label.toLowerCase() + (n.isBackup ? ' · backup' : '') })))
+            p.nodes.map((n, i) => [
+              i > 0 ? h('span', { class: 'mesh-then', text: s.routerConfig.strategy === 'weighted' ? 'or' : 'then' }) : null,
+              h('span', { class: 'chip', title: n.url }, stateDot(n), n.label, h('span', { class: 'chip-sub', text: STATE_VIEW[nodeState(n)].label.toLowerCase() })),
+            ])
           )
         )
       )
     );
-  }
-
-  function freeTierSummary(s) {
-    const list = uniqueByLabel(allNodes(s).filter((n) => n.quota)).sort((a, b) => b.quota.percentUsed - a.quota.percentUsed).slice(0, 4);
-    if (!list.length) return h('div', { class: 'empty' }, h('strong', { text: 'No request quotas tracked' }), 'Servers deployed by omnimesh up carry their cloud’s free limit.');
-    return h('div', { class: 'card-body stack' }, list.map((n) => h('div', null, h('div', { class: 'node-name', style: { marginBottom: '4px' }, text: n.label }), quotaBar(n.quota))));
-  }
-
-  function poolCard(p) {
-    const up = p.nodes.filter((n) => n.state !== 'down').length;
-    return h(
-      'section',
-      { class: 'card', style: { marginBottom: '16px' } },
-      h('div', { class: 'card-head' }, h('h2', { class: 'mono', text: p.prefix }), p.isDefault ? h('span', { class: 'pill idle', text: 'default pool' }) : null, h('span', { class: 'spacer' }), h('span', { class: 'muted small', text: up + ' of ' + p.nodes.length + ' nodes up' })),
-      h(
-        'div',
-        { class: 'table nodes' },
-        h('div', { class: 'tr th' }, ['Node', 'Status', 'Role', 'Latency', 'Errors', 'Free-tier quota'].map((x) => h('div', { text: x }))),
-        p.nodes.map((n) =>
-          h(
-            'div',
-            { class: 'tr' },
-            h('div', { class: 'node-cell' }, stateDot(n), h('div', { class: 'ellipsis' }, h('div', { class: 'node-name', text: n.label }), h('div', { class: 'node-url', text: n.url, title: n.url }), n.failureReason && n.state === 'down' ? h('div', { class: 'reason', text: n.failureReason }) : null)),
-            h('div', null, statePill(n)),
-            h('div', { class: 'muted' }, h('span', { class: 'cell-label', text: 'Role' }), n.isBackup ? 'Backup' : 'Primary' + (n.weight > 1 ? ' ×' + n.weight : '')),
-            h('div', { class: 'num' }, h('span', { class: 'cell-label', text: 'Latency' }), ms(n.latencyMs)),
-            h('div', { class: 'num' }, h('span', { class: 'cell-label', text: 'Errors' }), fmt(n.errors) + (n.requests ? ' (' + Math.round((n.errors / n.requests) * 100) + '%)' : '')),
-            n.quota ? quotaBar(n.quota) : h('div', { class: 'muted small', text: 'Limited by hours or bandwidth, not requests' })
-          )
-        )
-      )
-    );
-  }
-
-  function uniqueByLabel(nodes) {
-    const seen = new Map();
-    for (const n of nodes) if (!seen.has(n.label)) seen.set(n.label, n);
-    return [...seen.values()];
-  }
-  function poolsOf(s, label) {
-    return s.pools.filter((p) => p.nodes.some((n) => n.label === label)).map((p) => p.prefix);
   }
 
   function meshUsage(s) {
@@ -929,8 +1151,8 @@
 
   function providerCard(p, use) {
     const status = use
-      ? h('span', { class: 'pill ' + (use.down ? 'bad' : 'ok') }, use.down ? use.down + ' of ' + use.nodes + ' down' : 'In mesh · ' + use.nodes + (use.nodes === 1 ? ' node' : ' nodes'))
-      : h('span', { class: 'pill idle', text: 'Not added' });
+      ? h('span', { class: 'pill ' + (use.down ? 'bad' : 'ok') }, use.down ? use.down + ' of ' + use.nodes + ' not answering' : 'You use it · ' + plural(use.nodes, 'server'))
+      : h('span', { class: 'pill idle', text: 'Not used' });
     return h(
       'button',
       { class: 'provider', type: 'button', onclick: () => openProvider(p, use), attrs: { 'aria-label': p.displayName + ' details' } },
@@ -938,6 +1160,228 @@
       h('div', { class: 'provider-limits', text: limitsSummary(p.limits) }),
       h('div', { class: 'provider-foot' }, status, p.roles.slice(0, 3).map((r) => h('span', { class: 'role', text: r })))
     );
+  }
+
+  // ---------------------------------------------------------------- owner actions (real API calls)
+
+  function apiPost(path, body) {
+    return fetch(path, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + state.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+      cache: 'no-store',
+    }).then((res) =>
+      res.json().then(
+        (data) => ({ ok: res.ok, status: res.status, data }),
+        () => ({ ok: res.ok, status: res.status, data: {} })
+      )
+    );
+  }
+
+  function noteAction(text) {
+    state.lastAction = text;
+    toast(text);
+  }
+
+  async function checkNow() {
+    if (state.checking) return;
+    state.checking = true;
+    renderPage();
+    try {
+      const r = await apiPost('/_omnimesh/actions/check');
+      if (r.ok) {
+        const results = Object.values(r.data.nodes || {});
+        const bad = results.filter((x) => x.state !== 'online').length;
+        noteAction('Checked ' + plural(results.length, 'server') + (bad ? ': ' + bad + ' with a problem.' : ': all answering.'));
+      } else if (r.status === 404) {
+        signOut('Your sign-in key is no longer accepted. Run omnimesh open in your project folder.');
+        return;
+      } else {
+        noteAction(r.data.error || 'The check did not run (status ' + r.status + ').');
+      }
+    } catch (e) {
+      noteAction('Could not reach the router: ' + e.message);
+    } finally {
+      state.checking = false;
+    }
+    poll();
+  }
+
+  function confirmPause(pool, n) {
+    const others = (state.status.pools.find((p) => p.prefix === pool) || { nodes: [] }).nodes.filter((m) => m.url !== n.url).map((m) => m.label);
+    const go = h('button', { class: 'btn btn-primary', type: 'button' }, icon('pause', 14), 'Pause ' + n.label + ' for 60 s');
+    const msg = h('div', { class: 'form-error', attrs: { role: 'alert' } });
+    const drawer = openDrawer('Pause ' + n.label + '?', [
+      h('p', { style: { margin: 0 } }, 'The router stops sending visitors to ', h('strong', { text: n.label }), ' for 60 seconds. ', h('strong', { text: listWords(others) }), others.length === 1 ? ' answers instead.' : ' answer instead.'),
+      h('ul', { class: 'steps' }, h('li', { text: 'Nothing is switched off. ' + n.label + ' keeps running on ' + cloudName(n) + '.' }), h('li', { text: 'If every other server fails meanwhile, ' + n.label + ' still answers, so a pause never takes your app offline.' }), h('li', { text: 'It comes back by itself after 60 seconds, or press Resume now.' })),
+      h('div', { class: 'toolbar', style: { margin: 0 } }, go),
+      msg,
+    ]);
+    go.addEventListener('click', async () => {
+      go.disabled = true;
+      const r = await apiPost('/_omnimesh/actions/pause', { pool, node: n.label, seconds: 60 }).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
+      if (r.ok) {
+        drawer.close();
+        noteAction('Paused ' + n.label + ' until ' + clockTime(r.data.until) + '.' + (r.data.shared === false ? ' Only this router copy knows (the shared store did not answer).' : ''));
+        poll();
+      } else {
+        msg.textContent = r.data.error || 'The router refused (status ' + r.status + ').';
+        go.disabled = false;
+      }
+    });
+  }
+
+  async function resumeNode(pool, label) {
+    const r = await apiPost('/_omnimesh/actions/resume', { pool, node: label }).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
+    noteAction(r.ok ? label + ' gets traffic again.' : r.data.error || 'Could not resume ' + label + '.');
+    poll();
+  }
+
+  /** The request path used for a failover test: the server's health path when it belongs to this route. */
+  function testPath(prefix, healthPath) {
+    if (healthPath && (prefix === '/' || healthPath === prefix || healthPath.startsWith(prefix.replace(/\/$/, '') + '/'))) return healthPath;
+    return prefix;
+  }
+
+  async function askApp(path) {
+    const t0 = performance.now();
+    try {
+      const res = await fetch(path, { cache: 'no-store', credentials: 'omit' });
+      if (res.body && res.body.cancel) res.body.cancel().catch(() => {});
+      return { status: res.status, node: res.headers.get('X-Omni-Node'), attempts: Number(res.headers.get('X-Omni-Attempts') || 0), ms: Math.round(performance.now() - t0) };
+    } catch (e) {
+      return { status: 0, node: null, attempts: 0, ms: Math.round(performance.now() - t0) };
+    }
+  }
+  const wait = (msTime) => new Promise((r) => setTimeout(r, msTime));
+  const avgMs = (xs) => (xs.length ? Math.round(xs.reduce((a, b) => a + b.ms, 0) / xs.length) : 0);
+
+  function openFailoverTest() {
+    const s = state.status;
+    const pool = s.pools.slice().sort((a, b) => Number(b.isDefault) - Number(a.isDefault)).find((p) => p.nodes.length >= 2);
+    if (!pool) {
+      openDrawer('Test failover', [h('p', { style: { margin: 0 }, text: 'Every route has only one server, so there is nothing to fail over to yet.' }), h('p', { class: 'muted', style: { margin: 0 } }, 'Run ', h('code', { text: 'omnimesh up' }), ' in your project folder and connect a second cloud. Then come back and test.')]);
+      return;
+    }
+    const path = testPath(pool.prefix, pool.nodes[0].healthPath);
+    const steps = [
+      { text: 'Ask your app which server answers', state: 'wait', detail: '' },
+      { text: 'Pause that server', state: 'wait', detail: '' },
+      { text: 'Wait for another cloud to answer', state: 'wait', detail: '' },
+      { text: 'Send a few more requests', state: 'wait', detail: '' },
+      { text: 'Put the paused server back', state: 'wait', detail: '' },
+    ];
+    const list = h('ol', { class: 'run-steps' });
+    const verdictBox = h('div', { attrs: { 'aria-live': 'polite' } });
+    const start = h('button', { class: 'btn btn-primary', type: 'button' }, icon('zap', 14), 'Start the test');
+    const draw = () => {
+      clear(list);
+      for (const st of steps) {
+        const ic = { wait: 'minus', run: 'refresh', ok: 'check', bad: 'x' }[st.state];
+        list.appendChild(h('li', { class: 'run-step ' + st.state }, h('span', { class: 'check-icon ' + ({ wait: 'idle', run: 'idle', ok: 'ok', bad: 'bad' }[st.state]) }, icon(ic, 13)), h('div', null, h('div', { class: 'check-title', text: st.text }), st.detail ? h('div', { class: 'check-detail', text: st.detail }) : null)));
+      }
+    };
+    draw();
+    openDrawer('Test failover', [
+      h('p', { style: { margin: 0 } }, 'This sends real requests to ', h('strong', { text: location.origin + path }), ', pauses the server that answers for up to 60 seconds, and checks that another cloud takes over. Your visitors keep being served the whole time.'),
+      h('div', { class: 'toolbar', style: { margin: 0 } }, start),
+      list,
+      verdictBox,
+    ]);
+
+    const set = (i, st, detail) => {
+      steps[i].state = st;
+      if (detail !== undefined) steps[i].detail = detail;
+      draw();
+    };
+    const finish = (ok, text) => {
+      clear(verdictBox).appendChild(h('div', { class: 'banner ' + (ok ? 'ok' : 'bad') }, h('span', { class: 'dot ' + (ok ? 'ok' : 'bad') }), h('span', { text })));
+      state.failoverRunning = false;
+      clear(start);
+      append(start, [icon('zap', 14), 'Run it again']);
+      start.disabled = false;
+      noteAction(text);
+      poll();
+    };
+
+    start.addEventListener('click', async () => {
+      start.disabled = true;
+      state.failoverRunning = true;
+      for (const st of steps) {
+        st.state = 'wait';
+        st.detail = '';
+      }
+      clear(verdictBox);
+      const labels = pool.nodes.map((n) => n.label);
+      set(0, 'run');
+      const before = [];
+      for (let i = 0; i < 3; i++) before.push(await askApp(path));
+      const served = before.filter((a) => a.status > 0 && a.status < 500 && a.node && labels.includes(a.node));
+      if (!served.length) {
+        set(0, 'bad', 'Got ' + before.map((a) => a.status || 'no answer').join(', ') + ' on ' + path + '.');
+        return finish(false, 'Your app is not answering through the router right now, so failover cannot be tested. Check now shows which servers have a problem.');
+      }
+      const counts = {};
+      for (const a of served) counts[a.node] = (counts[a.node] || 0) + 1;
+      const target = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+      set(0, 'ok', target + ' answered ' + served.length + ' of ' + before.length + ' requests (avg ' + avgMs(served) + ' ms).');
+
+      set(1, 'run');
+      const pause = await apiPost('/_omnimesh/actions/pause', { pool: pool.prefix, node: target, seconds: 60 }).catch((e) => ({ ok: false, status: 0, data: { error: e.message } }));
+      if (!pause.ok) {
+        set(1, 'bad', pause.data.error || 'The router refused (status ' + pause.status + ').');
+        return finish(false, pause.status === 409 ? 'Failover would not work right now. ' + (pause.data.error || '') : 'The test could not pause ' + target + '.');
+      }
+      set(1, 'ok', target + ' gets no traffic until ' + clockTime(pause.data.until) + ' at the latest.');
+
+      let ok = false;
+      let text = '';
+      try {
+        set(2, 'run');
+        const t0 = Date.now();
+        let first = null;
+        let fallback = null;
+        while (Date.now() - t0 < 45000) {
+          const a = await askApp(path);
+          if (a.node && a.node !== target && a.status > 0 && a.status < 500) {
+            first = a;
+            break;
+          }
+          if ((a.node === target && a.attempts > 1) || a.status === 0 || a.status >= 500) fallback = a;
+          steps[2].detail = 'Still waiting… ' + Math.round((Date.now() - t0) / 1000) + ' s';
+          draw();
+          await wait(1000);
+        }
+        if (!first) {
+          const why = fallback
+            ? fallback.node === target
+              ? 'no other server could answer, so the router had to use ' + target + ' anyway'
+              : 'requests failed (' + (fallback.status || 'no answer') + ') while ' + target + ' was paused'
+            : 'the router kept using ' + target + '; other router copies may not have heard about the pause yet';
+          set(2, 'bad', why + '.');
+          text = 'Failover did not work: ' + why + '. Check now shows what is wrong with the other servers.';
+          return;
+        }
+        const took = Date.now() - t0;
+        set(2, 'ok', first.node + ' answered ' + (took < 1000 ? 'right away' : 'after ' + (took / 1000).toFixed(1) + ' s') + ' (' + first.ms + ' ms).');
+
+        set(3, 'run');
+        const during = [first];
+        while (during.length < 6) during.push(await askApp(path));
+        const good = during.filter((a) => a.status > 0 && a.status < 500 && a.node !== target);
+        const by = [...new Set(good.map((a) => a.node))];
+        set(3, good.length === during.length ? 'ok' : 'bad', good.length + ' of ' + during.length + ' answered by ' + (by.length ? listWords(by) : 'no other server') + ' (avg ' + avgMs(good) + ' ms).');
+        ok = good.length === during.length;
+        text = ok
+          ? 'Failover works. If ' + target + ' goes down, your visitors are moved to ' + listWords(by) + ' without errors.'
+          : 'Failover only partly worked: ' + (during.length - good.length) + ' of ' + during.length + ' requests were not answered by another server.';
+      } finally {
+        set(4, 'run');
+        const r = await apiPost('/_omnimesh/actions/resume', { pool: pool.prefix, node: target }).catch(() => ({ ok: false }));
+        set(4, r.ok ? 'ok' : 'bad', r.ok ? target + ' gets traffic again.' : 'Could not resume ' + target + '; the pause ends by itself within 60 s.');
+        finish(ok, text);
+      }
+    });
   }
 
   const HOST_HINTS = {
@@ -1065,44 +1509,6 @@
 
   function codeBlock(text) {
     return h('div', { class: 'code-block' }, h('pre', { text }), h('button', { class: 'btn btn-sm copy', type: 'button', onclick: () => copyText(text) }, icon('copy', 13), 'Copy'));
-  }
-
-  // ---------------------------------------------------------------- setup checks
-
-  function setupChecks(s) {
-    const nodes = allNodes(s);
-    const down = nodes.filter((n) => n.state === 'down');
-    const untested = nodes.filter((n) => n.state === 'unknown');
-    return [
-      { state: 'ok', title: 'Your API is online', detail: 'Answering at ' + s.domain + '.' },
-      { state: 'ok', title: 'You are signed in', detail: 'Your sign-in key works.' },
-      {
-        state: s.pools.every((p) => p.nodes.length > 0) ? 'ok' : 'bad',
-        title: 'Your API has servers',
-        detail: plural(s.pools.length, 'pool') + ', ' + plural(uniqueByLabel(nodes).length, 'distinct node') + '. Placeholder URLs are refused at startup, so these are real.',
-      },
-      down.length
-        ? { state: 'bad', title: 'All servers answer', detail: down.map((n) => n.label + ' (' + (n.failureReason || 'offline') + ')').join(', ') + ' not answering. Open that cloud’s dashboard and check the app’s logs.' }
-        : untested.length
-          ? { state: 'idle', title: 'All servers answer', detail: plural(untested.length, 'server') + ' not checked yet: ' + uniqueByLabel(untested).map((n) => n.label).join(', ') + '. The router checks every server every few minutes.' }
-          : { state: 'ok', title: 'All servers answer', detail: 'Every server answered its last check.' },
-    ].concat(sharedChecks(s));
-  }
-
-  function sharedChecks(s) {
-    return [
-      s.sharing.health === 'shared'
-        ? { state: 'ok', title: 'Shared node health (Cloudflare KV)', detail: 'Every router instance skips a dead node as soon as one of them sees it fail.' }
-        : { state: 'warn', title: 'Shared node health (Cloudflare KV)', detail: 'Not connected, so each copy of the router learns about offline servers on its own. Run omnimesh up again to set it up.' },
-      s.sharing.rateLimit === 'shared'
-        ? { state: 'ok', title: 'Shared rate limiter', detail: 'Per-IP and per-caller limits are counted across router instances.' }
-        : { state: s.routerConfig.rateLimit.enabled ? 'warn' : 'idle', title: 'Shared rate limiter', detail: s.routerConfig.rateLimit.enabled ? 'Counted per copy of the router only, so a bot spread over many IPs gets more. Run omnimesh up again to set it up.' : 'Rate limiting is off in the config.' },
-    ];
-  }
-
-  function checkRow(c) {
-    const ic = { ok: 'check', bad: 'x', warn: 'alert', idle: 'minus' }[c.state];
-    return h('div', { class: 'check' }, h('span', { class: 'check-icon ' + c.state }, icon(ic, 13)), h('div', null, h('div', { class: 'check-title', text: c.title }), h('div', { class: 'check-detail', text: c.detail })), h('span'));
   }
 
   // ---------------------------------------------------------------- config builder
@@ -1340,13 +1746,15 @@
     $('brand-version').textContent = 'v' + s.version;
     $('foot-domain').textContent = s.domain;
     $('foot-domain').title = s.domain;
-    $('foot-uptime').textContent = 'Instance up ' + duration(s.instance.uptimeSeconds);
-    const list = alerts(s);
+    $('foot-uptime').textContent = 'Router copy up ' + duration(s.instance.uptimeSeconds);
+    const list = needsAttention(s);
     const alertBtn = $('alerts');
     alertBtn.hidden = !list.length;
     if (list.length) {
       clear(alertBtn);
-      append(alertBtn, [icon('alert', 14), list.length + (list.length === 1 ? ' alert' : ' alerts')]);
+      alertBtn.className = 'alert-chip ' + (list.some((t) => t.state === 'bad') ? 'bad' : 'warn');
+      append(alertBtn, [icon('alert', 14), h('span', { text: String(list.length) }), h('span', { class: 'alert-text', text: list.length === 1 ? ' thing needs you' : ' things need you' })]);
+      alertBtn.title = list.length + (list.length === 1 ? ' thing needs your attention' : ' things need your attention');
     }
   }
 
@@ -1357,6 +1765,7 @@
     document.title = page.title + ' · OmniMesh';
     updateChrome();
     const view = clear($('view'));
+    state.lastRender = Date.now();
     if (!state.status) {
       view.appendChild(h('div', { class: 'card empty', text: 'Loading live data…' }));
       return;
@@ -1364,9 +1773,14 @@
     page.render(view, state.status);
   }
 
+  function routeFromHash() {
+    const raw = (location.hash.replace(/^#\/?/, '') || 'overview').split('?')[0];
+    const key = ROUTE_ALIASES[raw] || raw;
+    return PAGES[key] ? key : 'overview';
+  }
+
   function onRoute() {
-    const key = (location.hash.replace(/^#\/?/, '') || 'overview').split('?')[0];
-    state.route = PAGES[key] ? key : 'overview';
+    state.route = routeFromHash();
     closeSidebar();
     renderPage();
     $('view').focus({ preventScroll: true });
@@ -1410,7 +1824,7 @@
           api('/_omnimesh/catalog').then(
             (c) => {
               state.catalog = c.providers;
-              if (['providers', 'setup', 'free-tiers'].includes(state.route)) renderPage();
+              renderPage();
             },
             () => {}
           );
@@ -1420,8 +1834,16 @@
         const signature = JSON.stringify(Object.assign({}, data, { timestamp: 0, instance: 0 }));
         const changed = signature !== state.lastSignature;
         state.lastSignature = signature;
-        if (first || (changed && !PAGES[state.route].keepsInput)) renderPage();
+        // "2 min ago" texts go stale, so redraw at least every 30 s even when nothing changed
+        const stale = Date.now() - state.lastRender > 30000;
+        if (first || ((changed || stale) && !PAGES[state.route].keepsInput)) renderPage();
         else updateChrome();
+        // First visit and nothing known yet: ask every server once, so the owner sees a real answer
+        if (!state.autoChecked && !data.checks.lastAt && allNodes(data).every((n) => n.state === 'unknown')) {
+          state.autoChecked = true;
+          checkNow();
+        }
+        state.autoChecked = true;
         schedule(document.hidden ? POLL_MS * 5 : POLL_MS);
       })
       .catch((err) => {
@@ -1456,6 +1878,8 @@
     state.status = null;
     state.catalog = null;
     state.builder = null;
+    state.autoChecked = false;
+    state.lastAction = '';
     clear($('drawer-root'));
     showLogin(typeof message === 'string' ? message : '');
   }
@@ -1498,7 +1922,7 @@
       setTheme(dark ? 'light' : 'dark');
     });
     $('signout').addEventListener('click', () => signOut());
-    $('alerts').addEventListener('click', () => (location.hash = '#/overview'));
+    $('alerts').addEventListener('click', () => (location.hash = '#/setup'));
     window.addEventListener('hashchange', onRoute);
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
     document.addEventListener('visibilitychange', () => {
@@ -1523,8 +1947,7 @@
       history.replaceState(null, '', location.pathname + '#/overview');
     }
 
-    const key = (location.hash.replace(/^#\/?/, '') || 'overview').split('?')[0];
-    state.route = PAGES[key] ? key : 'overview';
+    state.route = routeFromHash();
     state.token = linkToken || getItem('session', TOKEN_KEY);
     if (state.token) {
       showShell();

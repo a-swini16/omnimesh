@@ -1,6 +1,7 @@
 import { createRouterApp } from './router.js';
 import { KvHealthStore } from './health-store.js';
 import { runKeepAlive } from './cron.js';
+import { checkTargets, recordDownServers, runChecks } from './checks.js';
 import { CloudflareRateLimiter } from './rate-limiter.js';
 import { parseOmniMeshConfigYaml } from '@omnimesh/core';
 
@@ -11,6 +12,7 @@ export * from './dispatcher.js';
 export * from './cron.js';
 export * from './rate-limiter.js';
 export * from './telemetry.js';
+export * from './checks.js';
 
 // One router per isolate: rebuilding it per request would reset the in-memory circuit breaker
 // and re-parse the config inside the 10ms CPU budget
@@ -31,7 +33,7 @@ export default {
       });
     }
 
-    const key = `${env.OMNIMESH_CONFIG_YAML}\n${env.GATEWAY_SECRET}`;
+    const key = `${env.OMNIMESH_CONFIG_YAML}\n${env.GATEWAY_SECRET}\n${env.OMNIMESH_APP ?? ''}`;
     if (!cached || cached.key !== key) {
       const config = parseOmniMeshConfigYaml(env.OMNIMESH_CONFIG_YAML);
       if (config.rateLimit.enabled && !env.RATE_LIMITER && !warnedNoSharedLimiter) {
@@ -49,6 +51,7 @@ export default {
           statusToken: env.OMNIMESH_STATUS_TOKEN,
           healthStore: env.OMNIMESH_KV ? new KvHealthStore(env.OMNIMESH_KV) : undefined,
           rateLimiter: env.RATE_LIMITER ? new CloudflareRateLimiter(env.RATE_LIMITER) : undefined,
+          appInfo: env.OMNIMESH_APP,
         }),
       };
     }
@@ -65,5 +68,21 @@ export default {
         gatewaySecret: env.GATEWAY_SECRET,
       });
     }
+
+    // Health checks every few minutes, shared through KV so the dashboard shows the same answer
+    // whichever router instance serves it. One KV write per run keeps well inside the free 1,000/day.
+    if (!env.OMNIMESH_CONFIG_YAML || !env.GATEWAY_SECRET || env.GATEWAY_SECRET.length < 32 || !env.OMNIMESH_KV) return;
+    const config = parseOmniMeshConfigYaml(env.OMNIMESH_CONFIG_YAML);
+    const store = new KvHealthStore(env.OMNIMESH_KV, { readCacheMs: 0 });
+    const previous = await store.getChecks(true);
+    const { snapshot, checked } = await runChecks({
+      targets: checkTargets(config),
+      gatewaySecret: env.GATEWAY_SECRET,
+      trigger: 'schedule',
+      previous,
+      includeSleepers: config.keepAlive.enabled,
+    });
+    await store.saveChecks(snapshot);
+    await recordDownServers(store, previous, checked);
   },
 };

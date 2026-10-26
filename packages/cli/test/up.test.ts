@@ -44,6 +44,10 @@ describe('omnimesh up: give us your backend, we host it', () => {
     expect(secrets.OMNIMESH_STATUS_TOKEN).toBe(result.statusToken);
     expect(secrets.OMNIMESH_CONFIG_YAML).toContain('om-shop-api.onrender.com');
     expect(upload.metadata.bindings).toContainEqual({ type: 'kv_namespace', name: 'OMNIMESH_KV', namespace_id: 'kv1' });
+    // Automatic health checks are scheduled on the Worker
+    const schedule = calls.find((c) => c.url.endsWith('/workers/scripts/om-shop-api/schedules'))!;
+    expect(schedule).toMatchObject({ method: 'PUT', body: [{ cron: '*/5 * * * *' }] });
+    expect(result.warnings.join(' ')).not.toMatch(/Automatic health checks are off/);
 
     const config = parseOmniMeshConfigYaml(fs.readFileSync(path.join(dir, 'omnimesh.config.yaml'), 'utf-8'));
     expect(config.domain).toBe('om-shop-api.me.workers.dev');
@@ -72,6 +76,14 @@ describe('omnimesh up: give us your backend, we host it', () => {
     expect(result.warnings.join(' ')).toMatch(/Only one cloud/);
   });
 
+  it('says so when Cloudflare will not schedule the health checks, and still deploys', async () => {
+    const { deps } = mockCloud({ cronLimit: true });
+    const result = await runUp(deps, { repoUrl: 'me/shop-api', tokens: TOKENS }, { cwd: dir, apis: APIS, bundle: fakeBundle });
+    expect(result.appUrl).toBe('https://om-shop-api.me.workers.dev');
+    expect(result.warnings.join(' ')).toMatch(/Automatic health checks are off.*limit of 5 cron triggers/);
+    expect(JSON.parse(fs.readFileSync(path.join(dir, '.omnimesh', 'deployment.json'), 'utf-8')).router.scheduleError).toBeUndefined();
+  });
+
   it('explains what is missing in plain words', async () => {
     const { deps } = mockCloud();
     await expect(runUp(deps, { repoUrl: 'me/shop-api', tokens: { koyeb: TOKENS.koyeb, cloudflare: '' } }, { cwd: dir, apis: APIS, bundle: fakeBundle })).rejects.toThrow(/Connect Cloudflare/);
@@ -89,6 +101,24 @@ describe('omnimesh up: give us your backend, we host it', () => {
     const status = await worker.fetch(new Request('https://x.workers.dev/_omnimesh/status', { headers: { Authorization: `Bearer ${'t'.repeat(40)}` } }), env, {});
     expect(status.status).toBe(200);
     expect((await worker.fetch(new Request('https://x.workers.dev/_omnimesh/dashboard'), env, {})).status).toBe(200);
+
+    // The scheduled run checks the real server and shares one snapshot through KV
+    const server = http.createServer((req, res) => {
+      res.statusCode = req.headers['x-gateway-secret'] === 'g'.repeat(40) ? 200 : 403;
+      res.end('ok');
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    const origin = `http://127.0.0.1:${(server.address() as any).port}`;
+    const kv = new Map<string, string>();
+    const OMNIMESH_KV = { get: async (k: string) => kv.get(k) ?? null, put: async (k: string, v: string) => void kv.set(k, v), delete: async (k: string) => void kv.delete(k) };
+    try {
+      await worker.scheduled({}, { ...env, OMNIMESH_KV, OMNIMESH_CONFIG_YAML: `defaultPool: /\npools:\n  /:\n    - ${origin}\n` }, {});
+    } finally {
+      server.close();
+    }
+    const snapshot = JSON.parse(kv.get('omnimesh:checks')!);
+    expect(snapshot.trigger).toBe('schedule');
+    expect(snapshot.nodes[origin]).toMatchObject({ state: 'online', status: 200, lock: 'locked' });
   }, 30000);
 });
 

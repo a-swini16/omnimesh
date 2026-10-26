@@ -1,3 +1,4 @@
+import { SCHEDULE_CRON } from '@omnimesh/router';
 import { callApi, type Deps } from './http.js';
 
 export const CLOUDFLARE_API = 'https://api.cloudflare.com/client/v4';
@@ -9,12 +10,16 @@ export interface RouterDeployInput {
   scriptName: string;
   script: string;
   secrets: Record<string, string>;
+  /** Plain (non-secret) text values, e.g. which repo is deployed */
+  vars?: Record<string, string>;
 }
 
 export interface RouterDeployResult {
   url: string;
   accountId: string;
   kvNamespaceId: string;
+  /** Why automatic health checks could not be turned on; undefined when they are on */
+  scheduleError?: string;
 }
 
 const KV_TITLE = 'omnimesh-health';
@@ -40,6 +45,7 @@ export async function deployCloudflareRouter(deps: Deps, input: RouterDeployInpu
     compatibility_date: '2025-01-01',
     bindings: [
       ...Object.entries(input.secrets).map(([name, text]) => ({ type: 'secret_text', name, text })),
+      ...Object.entries(input.vars ?? {}).map(([name, text]) => ({ type: 'plain_text', name, text })),
       { type: 'kv_namespace', name: 'OMNIMESH_KV', namespace_id: kvNamespaceId },
     ],
   };
@@ -55,5 +61,14 @@ export async function deployCloudflareRouter(deps: Deps, input: RouterDeployInpu
   }
   const url = `https://${input.scriptName}.${sub.subdomain}.workers.dev`;
   deps.log(`Cloudflare: router live at ${url}`);
-  return { url, accountId, kvNamespaceId };
+
+  // Automatic health checks every 5 minutes (a Cron Trigger; free accounts get 5 in total)
+  let scheduleError: string | undefined;
+  try {
+    await cf(`/accounts/${accountId}/workers/scripts/${input.scriptName}/schedules`, { method: 'PUT', json: [{ cron: SCHEDULE_CRON }] });
+    deps.log('Cloudflare: automatic health checks every 5 minutes');
+  } catch (e) {
+    scheduleError = (e as Error).message;
+  }
+  return { url, accountId, kvNamespaceId, ...(scheduleError ? { scheduleError } : {}) };
 }

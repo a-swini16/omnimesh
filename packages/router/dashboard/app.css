@@ -263,6 +263,8 @@ nav { flex: 1; overflow-y: auto; }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .live-chip .live-text { display: none; }
+  .alert-chip .alert-text { display: none; }
+  .topbar-title h1 { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #page-sub { display: none; }
   .nodes .tr.th { display: none; }
   .nodes .tr { grid-template-columns: 1fr 1fr; }
@@ -282,3 +284,56 @@ nav { flex: 1; overflow-y: auto; }
 .advanced { margin-top: 16px; }
 .advanced > summary { cursor: pointer; color: var(--muted); font-weight: 600; padding: 8px 0; }
 .advanced > p { margin: 4px 0 12px; }
+
+/* Status headline: the one answer to "is my app OK?" */
+.spacer { flex: 1; }
+.btn:disabled { opacity: .55; cursor: default; }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn-ghost:hover { color: var(--text); }
+.hero { display: grid; grid-template-columns: auto 1fr; gap: 18px; padding: 22px 24px; margin-bottom: 16px; position: relative; overflow: hidden; }
+.hero::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--idle); }
+.hero-icon { width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center; background: var(--surface-3); color: var(--muted); }
+.hero-ok::before { background: var(--ok); } .hero-ok .hero-icon { background: var(--ok-soft); color: var(--ok); }
+.hero-warn::before { background: var(--warn); } .hero-warn .hero-icon { background: var(--warn-soft); color: var(--warn); }
+.hero-bad::before { background: var(--bad); } .hero-bad .hero-icon { background: var(--bad-soft); color: var(--bad); }
+.hero-main { min-width: 0; display: grid; gap: 6px; }
+.hero-title { font-size: 22px; letter-spacing: -.02em; }
+.hero-text { margin: 0; color: var(--muted); font-size: 14.5px; max-width: 78ch; }
+.hero-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.hero-meta { margin-top: 2px; }
+.alert-chip.warn { color: var(--warn); background: var(--warn-soft); }
+.kpis.kpis-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* Server cards */
+.server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.server-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; display: grid; gap: 12px; align-content: start; border-top: 3px solid var(--idle); }
+.server-card.state-ok { border-top-color: var(--ok); }
+.server-card.state-warn { border-top-color: var(--warn); }
+.server-card.state-bad { border-top-color: var(--bad); }
+.server-top { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.server-tags { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.server-tags .pill svg { margin-right: 1px; }
+.server-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin: 0; }
+.server-facts dt { color: var(--faint); font-size: 11.5px; font-weight: 600; }
+.server-facts dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.server-note { font-size: 12.5px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; }
+.server-note.bad { color: var(--bad); background: var(--bad-soft); border-color: transparent; font-family: var(--mono); font-size: 12px; }
+.server-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.mesh-then { color: var(--faint); font-size: 12px; align-self: center; }
+
+/* Failover test steps */
+.run-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.run-step { display: grid; grid-template-columns: 26px 1fr; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
+.run-step:last-child { border-bottom: 0; }
+.run-step.wait { opacity: .6; }
+.run-step.run .check-icon svg { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .run-step.run .check-icon svg { animation: none; } }
+
+@media (max-width: 1100px) { .kpis.kpis-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 860px) {
+  .hero { grid-template-columns: 1fr; padding: 18px; }
+  .hero-icon { width: 44px; height: 44px; }
+  .hero-title { font-size: 19px; }
+  .server-grid { grid-template-columns: 1fr; }
+}

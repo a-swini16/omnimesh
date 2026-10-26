@@ -6,6 +6,7 @@ import { prepareBufferedRequest, fetchWithTimeout, BodyTooLargeError, DEFAULT_MA
 import { MemoryRateLimiter, type RateLimiter } from './rate-limiter.js';
 import { RouterTelemetry } from './telemetry.js';
 import { registerDashboard } from './dashboard.js';
+import { checkTargets, MAX_CHECKED_NODES, recordDownServers, runChecks, SCHEDULE_CRON, type NodeCheck } from './checks.js';
 import { getAllProviders } from '@omnimesh/providers';
 
 export interface RouterOptions {
@@ -19,6 +20,31 @@ export interface RouterOptions {
   /** Random source for weighted selection (injectable for tests). */
   random?: () => number;
   telemetry?: RouterTelemetry;
+  /** JSON written by `omnimesh up` (OMNIMESH_APP): which repo and branch is deployed, and when */
+  appInfo?: string;
+}
+
+export interface AppInfo {
+  repo: string;
+  repoUrl: string;
+  branch: string;
+  runtime: string;
+  deployedAt: string;
+}
+
+/** Keep only the known fields, as short strings, so the dashboard never renders anything unexpected. */
+export function parseAppInfo(raw: string | undefined): AppInfo | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw);
+    const str = (x: unknown) => (typeof x === 'string' ? x.slice(0, 200) : '');
+    const info = { repo: str(v.repo), repoUrl: str(v.repoUrl), branch: str(v.branch), runtime: str(v.runtime), deployedAt: str(v.deployedAt) };
+    if (!info.repo) return null;
+    if (!/^https:\/\/github\.com\//.test(info.repoUrl)) info.repoUrl = '';
+    return info;
+  } catch {
+    return null;
+  }
 }
 
 // Headers that describe a single hop and must not be forwarded, plus ones the router owns
@@ -42,6 +68,24 @@ interface Candidate {
 const HARD_FAILURE_STATUSES = new Set([429, 502, 503, 504]);
 // Methods whose app-level 5xx may be retried on another node
 const READ_METHODS = new Set(['GET', 'HEAD']);
+/** A pause is for testing failover or short maintenance, never a way to switch a server off for good */
+export const MAX_PAUSE_SECONDS = 300;
+/** A manual check makes up to 2 requests per server, so one router instance runs at most one per this window */
+const MANUAL_CHECK_COOLDOWN_MS = 20_000;
+
+/** What the dashboard shows for a node: the most recent evidence wins (live traffic or a health check). */
+export function nodeState(
+  circuit: { status: string; lastChecked: number } | undefined,
+  check: NodeCheck | undefined,
+  pausedUntil: number | undefined
+): 'paused' | 'healthy' | 'error' | 'down' | 'unknown' {
+  if (pausedUntil) return 'paused';
+  const checkAt = check?.at ?? -1;
+  const trafficAt = circuit?.lastChecked ?? -1;
+  if (circuit && trafficAt >= checkAt) return circuit.status === 'dead' ? 'down' : 'healthy';
+  if (check) return check.state === 'online' ? 'healthy' : check.state;
+  return 'unknown';
+}
 
 /** Request credential headers that make a response user-specific. */
 function credentialHeaders(request: Request): string[] {
@@ -117,6 +161,7 @@ export function createRouterApp(options: RouterOptions) {
   const rateLimiter = options.rateLimiter || new MemoryRateLimiter(config.rateLimit.requestsPerMinute, 60_000);
   const statusToken = options.statusToken || readEnv('OMNIMESH_STATUS_TOKEN');
   const random = options.random || Math.random;
+  const appInfo = parseAppInfo(options.appInfo ?? readEnv('OMNIMESH_APP'));
   const strategy = config.router.strategy ?? 'priority';
   const telemetry = options.telemetry || new RouterTelemetry();
   if (config.router.failureThreshold !== undefined) {
@@ -166,6 +211,8 @@ export function createRouterApp(options: RouterOptions) {
     });
   }
   const prefixes = Object.keys(pools);
+  const targets = checkTargets(config);
+  const targetsByUrl = new Map(targets.map((t) => [t.url, t]));
   const defaultPool = config.defaultPool === undefined ? '/api' : config.defaultPool;
   const internalOrigins = new Set(Object.values(pools).flat().map((n) => new URL(n.url).origin));
   /** Map an absolute URL on any mesh node onto the public origin; null when it is not internal. */
@@ -191,6 +238,8 @@ export function createRouterApp(options: RouterOptions) {
       return c.json({ error: 'Not Found' }, 404);
     }
     const health = await healthStore.getAllNodeHealth();
+    const paused = await healthStore.getPaused();
+    const checks = await healthStore.getChecks();
     const poolSnapshots = await Promise.all(
       Object.entries(pools).map(async ([prefix, nodes]) => ({
         prefix,
@@ -200,15 +249,28 @@ export function createRouterApp(options: RouterOptions) {
             const h = health[n.url];
             const counters = telemetry.nodeCounters(n.url);
             const usage = n.quota ? await quotaTracker.getUsage(n.quotaKey, n.quota) : undefined;
+            const check = checks?.nodes[n.url];
+            const state = nodeState(h, check, paused[n.url]);
+            const trafficIsNewer = h && h.lastChecked >= (check?.at ?? -1);
             return {
               label: n.label,
               providerId: n.providerId ?? null,
               url: n.url,
               weight: n.weight,
               isBackup: n.isBackup,
-              state: h ? (h.status === 'dead' ? 'down' : 'healthy') : 'unknown',
-              failureReason: h?.status === 'dead' ? h.failureReason ?? null : null,
-              lastChecked: h?.lastChecked ?? null,
+              state,
+              failureReason:
+                state === 'down' || state === 'error'
+                  ? (trafficIsNewer ? h?.failureReason : check?.reason) ?? null
+                  : null,
+              lastChecked: Math.max(h?.lastChecked ?? 0, check?.at ?? 0) || null,
+              pausedUntil: paused[n.url] ? new Date(paused[n.url]).toISOString() : null,
+              check: check ?? null,
+              lock: check?.lock ?? 'unknown',
+              sleepsIfIdle: targetsByUrl.get(n.url)?.sleepsIfIdle ?? false,
+              healthPath: targetsByUrl.get(n.url)?.healthPath ?? null,
+              // Only the first MAX_CHECKED_NODES servers fit in one Cloudflare run
+              checkable: targets.findIndex((t) => t.url === n.url) < MAX_CHECKED_NODES,
               latencyMs: counters.lastLatencyMs ?? h?.latencyMs ?? null,
               requests: counters.requests,
               errors: counters.errors,
@@ -232,6 +294,7 @@ export function createRouterApp(options: RouterOptions) {
       domain: config.domain,
       instance: { startedAt: new Date(telemetry.startedAt).toISOString(), uptimeSeconds: Math.floor((Date.now() - telemetry.startedAt) / 1000) },
       version: OMNIMESH_VERSION,
+      app: appInfo,
       routerConfig: {
         ...config.router,
         maxBodyBytes: config.router.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
@@ -245,6 +308,12 @@ export function createRouterApp(options: RouterOptions) {
         rateLimit: rateLimiter instanceof MemoryRateLimiter ? 'per-instance' : 'shared',
       },
       keepAlive: { enabled: config.keepAlive.enabled },
+      checks: {
+        lastAt: checks ? new Date(checks.at).toISOString() : null,
+        lastTrigger: checks?.trigger ?? null,
+        lastScheduledAt: checks?.lastScheduledAt ? new Date(checks.lastScheduledAt).toISOString() : null,
+        schedule: SCHEDULE_CRON,
+      },
       totals: telemetry.totals,
       latency: telemetry.latency(),
       pools: poolSnapshots,
@@ -266,6 +335,101 @@ export function createRouterApp(options: RouterOptions) {
         limits: p.limits,
       })),
     });
+  });
+
+  /** Resolve {pool, node} from an operator action to the node's URL. */
+  const findNode = (pool: unknown, label: unknown) =>
+    typeof pool === 'string' && typeof label === 'string' && Object.hasOwn(pools, pool) ? pools[pool].find((n) => n.label === label) : undefined;
+  const readAction = async (c: any): Promise<Record<string, unknown>> => {
+    const text = await c.req.text().catch(() => '');
+    if (text.length > 1024) return {};
+    try {
+      const body = JSON.parse(text || '{}');
+      return body && typeof body === 'object' ? body : {};
+    } catch {
+      return {};
+    }
+  };
+
+  // Pause a server: no traffic is sent to it until the pause ends, except as a last resort when every
+  // other server fails, so a pause can never take the app offline on its own
+  app.post('/_omnimesh/actions/pause', async (c) => {
+    if (!isOperator(c.req.header('authorization'))) return c.json({ error: 'Not Found' }, 404);
+    const body = await readAction(c);
+    const node = findNode(body.pool, body.node);
+    if (!node) return c.json({ error: 'Unknown server', code: 'ERR_UNKNOWN_NODE' }, 400);
+    const seconds = body.seconds === undefined ? 60 : Number(body.seconds);
+    if (!Number.isInteger(seconds) || seconds < 10 || seconds > MAX_PAUSE_SECONDS) {
+      return c.json({ error: `seconds must be a whole number from 10 to ${MAX_PAUSE_SECONDS}`, code: 'ERR_BAD_PAUSE' }, 400);
+    }
+    // Refuse when no other server in any pool that uses this one could take its traffic
+    const [paused, health, checks] = await Promise.all([healthStore.getPaused(), healthStore.getAllNodeHealth(), healthStore.getChecks()]);
+    for (const [prefix, nodes] of Object.entries(pools)) {
+      if (!nodes.some((n) => n.url === node.url)) continue;
+      const others = nodes.filter((n) => n.url !== node.url && nodeState(health[n.url], checks?.nodes[n.url], paused[n.url]) !== 'paused');
+      const usable = others.filter((n) => nodeState(health[n.url], checks?.nodes[n.url], undefined) !== 'down');
+      if (usable.length === 0) {
+        return c.json(
+          {
+            error: others.length
+              ? `Every other server for ${prefix} is down right now, so pausing ${node.label} would take your app offline.`
+              : `${node.label} is the only server for ${prefix}, so pausing it would take your app offline. Connect a second cloud first.`,
+            code: 'ERR_LAST_SERVER',
+          },
+          409
+        );
+      }
+    }
+    const until = Date.now() + seconds * 1000;
+    let shared = true;
+    try {
+      await healthStore.pauseNode(node.url, until);
+    } catch {
+      // The pause applies on this router instance; other instances keep sending traffic
+      shared = false;
+    }
+    telemetry.note({ kind: 'paused', node: node.label, pool: body.pool as string, detail: `${seconds} s` });
+    return c.json({ paused: node.label, until: new Date(until).toISOString(), shared });
+  });
+
+  app.post('/_omnimesh/actions/resume', async (c) => {
+    if (!isOperator(c.req.header('authorization'))) return c.json({ error: 'Not Found' }, 404);
+    const body = await readAction(c);
+    const node = findNode(body.pool, body.node);
+    if (!node) return c.json({ error: 'Unknown server', code: 'ERR_UNKNOWN_NODE' }, 400);
+    let shared = true;
+    try {
+      await healthStore.resumeNode(node.url);
+    } catch {
+      shared = false;
+    }
+    telemetry.note({ kind: 'resumed', node: node.label, pool: body.pool as string, detail: 'by the owner' });
+    return c.json({ resumed: node.label, shared });
+  });
+
+  // Check every server now, including free servers that sleep (a manual check may wake them)
+  let lastManualCheck = 0;
+  app.post('/_omnimesh/actions/check', async (c) => {
+    if (!isOperator(c.req.header('authorization'))) return c.json({ error: 'Not Found' }, 404);
+    const wait = lastManualCheck + MANUAL_CHECK_COOLDOWN_MS - Date.now();
+    if (wait > 0) {
+      c.header('Retry-After', String(Math.ceil(wait / 1000)));
+      return c.json({ error: `Checked a moment ago. Try again in ${Math.ceil(wait / 1000)} s.`, code: 'ERR_CHECK_COOLDOWN' }, 429);
+    }
+    lastManualCheck = Date.now();
+    // Read past the cache: merging into a stale snapshot would undo a scheduled run that just finished
+    const previous = await healthStore.getChecks(true);
+    const { snapshot, checked } = await runChecks({ targets, gatewaySecret, trigger: 'manual', previous });
+    const latest = await healthStore.getChecks(true);
+    // A scheduled run finished while this one was waiting: keep its timestamp
+    if (latest?.lastScheduledAt && latest.lastScheduledAt > (snapshot.lastScheduledAt ?? 0)) snapshot.lastScheduledAt = latest.lastScheduledAt;
+    await healthStore.saveChecks(snapshot);
+    await recordDownServers(healthStore, previous, checked);
+    for (const [nodeUrl, result] of Object.entries(checked)) {
+      const t = targetsByUrl.get(nodeUrl);
+      if (t) telemetry.checkFinished(nodeUrl, t.label, t.pool, result.state !== 'down', result.reason ?? undefined);
+    }
+    return c.json({ checkedAt: new Date(snapshot.at).toISOString(), nodes: checked });
   });
 
   // Operator dashboard; hidden entirely when no status token is configured
@@ -310,6 +474,9 @@ export function createRouterApp(options: RouterOptions) {
       return c.json({ error: 'No upstream configured for this path.', code: 'ERR_NO_POOL_CANDIDATES' }, 502);
     }
 
+    // Read pauses while the body is buffered (a KV read every few seconds per instance)
+    const pausedRead = healthStore.getPaused().catch((): Record<string, number> => ({}));
+
     // 2. Prepare buffered request (buffer body if <= maxBufferBytes)
     let bufferedReq;
     try {
@@ -326,20 +493,29 @@ export function createRouterApp(options: RouterOptions) {
     const circuitTtlMs = config.router.circuitTtlMs;
     const healthyCandidates: Candidate[] = [];
     const deadCandidates: Candidate[] = [];
+    const pausedCandidates: Candidate[] = [];
+    const paused = await pausedRead;
 
     for (const node of candidates) {
+      // A paused node is skipped without touching its circuit, so a half-open probe cannot revive it
+      if (paused[node.url]) {
+        pausedCandidates.push(node);
+        continue;
+      }
       const quotaOk = !node.quota || (await quotaTracker.canAcceptTraffic(node.quotaKey, node.quota));
       if (node.quota) telemetry.quotaChecked(node.url, node.label, matchedPrefix, quotaOk);
       const isHealthy = quotaOk && (await healthStore.isNodeHealthy(node.url, circuitTtlMs));
       (isHealthy ? healthyCandidates : deadCandidates).push(node);
     }
 
-    // Healthy primaries (by priority or weight), then healthy backups, then open circuits as a last resort
+    // Healthy primaries (by priority or weight), then healthy backups, then paused nodes (working, just
+    // set aside by the owner), then open circuits as a last resort
     const primaries = healthyCandidates.filter((n) => !n.isBackup);
     const backups = healthyCandidates.filter((n) => n.isBackup);
     const candidateQueue = [
       ...(strategy === 'weighted' ? weightedOrder(primaries, random) : primaries),
       ...backups,
+      ...pausedCandidates,
       ...deadCandidates,
     ];
 

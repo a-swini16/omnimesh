@@ -2,6 +2,18 @@
 
 All notable changes to OmniMesh. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Health checks:** the router asks every server's health path every 5 minutes (a Worker Cron Trigger that `omnimesh up` turns on) and when you press **Check now**. Results are shared through KV, one write per run. Free servers that sleep when idle (Render) are only checked on demand, because a timer would keep them awake.
+- **Lock level:** each check also learns whether a server refuses requests that skip the router (Locked) or accepts them from anyone (Not locked).
+- **Pause and resume a server** (10–300 s) from the dashboard or `POST /_omnimesh/actions/pause`. A pause is refused when it would leave a route without a working server, and a paused server still answers as a last resort.
+- **Real failover test:** `omnimesh chaos` and the dashboard's **Test failover** pause the answering server on your deployment, send real requests, report which cloud took over, and resume it.
+- The dashboard leads with one plain answer ("Your app is up", "…but render is not answering", "Your app is down"), a list of what needs your attention, server cards, and your repo, branch and deploy time (from `omnimesh up`).
+
+### Removed
+- The old `omnimesh chaos` simulation with local stand-in servers.
+
 ## [1.1.0] - 2026-10-25
 
 ### Added

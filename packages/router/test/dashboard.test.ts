@@ -100,10 +100,13 @@ describe('live status API and dashboard', () => {
     }
   });
 
-  it('dashboard script never injects markup and renders the down banner only for down nodes', async () => {
+  it('dashboard script never injects markup, shows no invented numbers, and only calls the real API', async () => {
     const js = await (await make().request('/_omnimesh/dashboard/app.js')).text();
     expect(js).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function/);
-    expect(js).toMatch(/if \(n\.state === 'down'\) \{\s*list\.push/);
+    // No hardcoded costs, fake metrics or random ids anywhere in what the owner sees
+    expect(js).not.toMatch(/\$0\.00|Math\.random|demo|mock|simulat/i);
+    const endpoints = [...new Set([...js.matchAll(/'(\/_omnimesh\/[a-z/-]+)'/g)].map((m) => m[1]))].sort();
+    expect(endpoints).toEqual(['/_omnimesh/actions/check', '/_omnimesh/actions/pause', '/_omnimesh/actions/resume', '/_omnimesh/catalog', '/_omnimesh/status']);
   });
 
   it('catalog lists every provider with card requirement and limits, behind the token', async () => {

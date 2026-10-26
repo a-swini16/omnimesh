@@ -1,4 +1,4 @@
-export type RouterEventKind = 'node_down' | 'node_up' | 'failover' | 'outage' | 'quota_limit';
+export type RouterEventKind = 'node_down' | 'node_up' | 'failover' | 'outage' | 'quota_limit' | 'paused' | 'resumed';
 
 export interface RouterEvent {
   at: number;
@@ -57,6 +57,11 @@ export class RouterTelemetry {
     if (this.events.length > this.maxEvents) this.events.shift();
   }
 
+  /** Record an owner action (pause, resume) in the event list. */
+  note(event: Omit<RouterEvent, 'at' | 'count'>): void {
+    this.push(event);
+  }
+
   attemptFailed(url: string, label: string, pool: string, reason: string, opensCircuit: boolean): void {
     const n = this.node(url);
     n.requests += 1;
@@ -64,6 +69,16 @@ export class RouterTelemetry {
     if (opensCircuit && !this.down.has(url)) {
       this.down.add(url);
       this.push({ kind: 'node_down', node: label, pool, detail: reason });
+    }
+  }
+
+  /** A health check result: records the moment a server stops or starts answering, like live traffic does. */
+  checkFinished(url: string, label: string, pool: string, online: boolean, reason?: string): void {
+    if (!online && !this.down.has(url)) {
+      this.down.add(url);
+      this.push({ kind: 'node_down', node: label, pool, detail: reason ? `health check: ${reason}` : 'health check failed' });
+    } else if (online && this.down.delete(url)) {
+      this.push({ kind: 'node_up', node: label, pool, detail: 'health check' });
     }
   }
 

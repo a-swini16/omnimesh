@@ -157,6 +157,15 @@ export async function runUp(deps: Deps, input: UpInput, opts: UpOptions): Promis
         OMNIMESH_STATUS_TOKEN: statusToken,
         OMNIMESH_CONFIG_YAML: stringifyOmniMeshConfigYaml(meshConfig(`${scriptName}.workers.dev`, nodes)),
       },
+      vars: {
+        OMNIMESH_APP: JSON.stringify({
+          repo: repo.slug,
+          repoUrl: `https://github.com/${repo.slug}`,
+          branch: repo.branch,
+          runtime: repo.runtime,
+          deployedAt: new Date().toISOString(),
+        }),
+      },
     },
     opts.apis?.cloudflare ?? CLOUDFLARE_API
   );
@@ -172,11 +181,20 @@ export async function runUp(deps: Deps, input: UpInput, opts: UpOptions): Promis
   } catch (e) {
     warnings.push(`The router is deployed but did not answer yet (${(e as Error).message}). New workers.dev URLs can take a minute.`);
   }
+  if (router.scheduleError) {
+    warnings.push(`Automatic health checks are off: Cloudflare refused the schedule (${router.scheduleError}). Free accounts allow 5 scheduled Workers; the dashboard's "Check now" still works.`);
+  }
   if (nodes.length === 1) warnings.push('Only one cloud is hosting your backend, so there is nothing to fail over to yet. Connect a second one.');
   warnings.push('Your backend URLs on each cloud are still reachable directly. Add gatewayAuth() from @omnimesh/node to accept traffic only through the router.');
 
   fs.mkdirSync(path.join(opts.cwd, '.omnimesh'), { recursive: true });
-  const state: DeploymentState = { appName, repo, nodes, router, updatedAt: new Date().toISOString() };
+  const state: DeploymentState = {
+    appName,
+    repo,
+    nodes,
+    router: { url: router.url, accountId: router.accountId, kvNamespaceId: router.kvNamespaceId },
+    updatedAt: new Date().toISOString(),
+  };
   fs.writeFileSync(path.join(opts.cwd, STATE_FILE), JSON.stringify(state, null, 2), { mode: 0o600 });
   fs.writeFileSync(path.join(opts.cwd, 'omnimesh.config.yaml'), stringifyOmniMeshConfigYaml(config));
   writeDotEnv(opts.cwd, { GATEWAY_SECRET: gatewaySecret, OMNIMESH_STATUS_TOKEN: statusToken });

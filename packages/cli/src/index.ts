@@ -51,10 +51,16 @@ export function createProgram() {
 
   program
     .command('chaos')
-    .description('Kill a node live to demonstrate sub-3-second cross-cloud failover')
-    .option('-t, --timeout <ms>', 'Per-node timeout in milliseconds (default: 2500)', '2500')
+    .description('Test failover on your real deployment: pause one server, check another cloud answers, then resume it')
+    .option('-s, --seconds <n>', 'Longest the server stays paused (10-300, default 60)', '60')
     .action(async (opts) => {
-      if ((await runChaos({ timeoutMs: parseInt(opts.timeout, 10) })) === false) process.exitCode = 1;
+      const seconds = parseInt(opts.seconds, 10);
+      if (!Number.isInteger(seconds) || seconds < 10 || seconds > 300) {
+        console.error('--seconds must be a whole number from 10 to 300');
+        process.exitCode = 1;
+        return;
+      }
+      if (!(await runChaos({ seconds })).ok) process.exitCode = 1;
     });
 
   program

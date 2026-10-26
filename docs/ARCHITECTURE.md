@@ -25,7 +25,8 @@
    2. Pastes one API token per provider. No credit card? Oracle and R2 are simply skipped.
    3. Runs omnimesh deploy . The same app is deployed to every provider, and one domain
       routes to all of them.
-   4. Runs omnimesh chaos to kill a server and watch traffic move to another one live.
+   4. Runs omnimesh chaos (or presses Test failover in the dashboard): one server is paused
+      for a moment and the owner sees another cloud answer real requests.
 
   Positioning (what the README says): "Your free tiers, merged into one cloud." It is a
   resilient multi-cloud backend for modern apps, startups and production systems. It is not marketed
@@ -362,8 +363,9 @@ OmniMesh — System Architecture v2
 
     Command                                What it does
 
-     omnimesh chaos                        Takes one node down on purpose and shows the
-                                           failover time; the demo people share
+     omnimesh chaos                        Pauses the answering server on the real
+                                           deployment, shows which cloud took over and
+                                           how fast, then resumes it
 
      omnimesh doctor                       Checks config, tokens, secrets and quotas, and
                                            explains how to fix each problem
