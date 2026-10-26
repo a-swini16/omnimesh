@@ -182,8 +182,8 @@ importers:
   benchmarks:
     dependencies:
       '@hono/node-server':
-        specifier: ^1.13.8
-        version: 1.19.17(hono@4.13.13)
+        specifier: ^2.1.5
+        version: 2.1.5(hono@4.13.13)
       '@omnimesh/core':
         specifier: workspace:*
         version: link:../packages/core
@@ -204,8 +204,8 @@ importers:
   examples/auth-service:
     dependencies:
       '@hono/node-server':
-        specifier: ^1.13.8
-        version: 1.19.17(hono@4.13.13)
+        specifier: ^2.1.5
+        version: 2.1.5(hono@4.13.13)
       '@omnimesh/node':
         specifier: workspace:*
         version: link:../../packages/node
@@ -226,8 +226,8 @@ importers:
   examples/rest-api:
     dependencies:
       '@hono/node-server':
-        specifier: ^1.13.8
-        version: 1.19.17(hono@4.13.13)
+        specifier: ^2.1.5
+        version: 2.1.5(hono@4.13.13)
       '@omnimesh/node':
         specifier: workspace:*
         version: link:../../packages/node
@@ -245,8 +245,8 @@ importers:
   examples/webhooks:
     dependencies:
       '@hono/node-server':
-        specifier: ^1.13.8
-        version: 1.19.17(hono@4.13.13)
+        specifier: ^2.1.5
+        version: 2.1.5(hono@4.13.13)
       '@omnimesh/node':
         specifier: workspace:*
         version: link:../../packages/node
@@ -264,8 +264,8 @@ importers:
   packages/cli:
     dependencies:
       '@hono/node-server':
-        specifier: ^1.13.8
-        version: 1.19.17(hono@4.13.13)
+        specifier: ^2.1.5
+        version: 2.1.5(hono@4.13.13)
       '@omnimesh/core':
         specifier: workspace:*
         version: link:../core
@@ -355,8 +355,8 @@ importers:
   packages/router:
     dependencies:
       '@hono/node-server':
-        specifier: ^1.13.8
-        version: 1.19.17(hono@4.13.13)
+        specifier: ^2.1.5
+        version: 2.1.5(hono@4.13.13)
       '@omnimesh/core':
         specifier: workspace:*
         version: link:../core
@@ -538,11 +538,11 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@hono/node-server@1.19.17':
-    resolution: {integrity: sha512-dSneS5qhiauZWGDCeK4o695Xd9nUNjviSZCMQrj10eetr8Uln1ucn6bbphOM6UynAMMtNIzZNSpL9vnASJwrPQ==}
-    engines: {node: '>=18.14.1'}
+  '@hono/node-server@2.1.5':
+    resolution: {integrity: sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q==}
+    engines: {node: '>=20'}
     peerDependencies:
-      hono: ^4
+      hono: ^4 || ^5.0.0-0
 
   '@jridgewell/sourcemap-codec@1.6.0':
     resolution: {integrity: sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw==}
@@ -1071,7 +1071,7 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@hono/node-server@1.19.17(hono@4.13.13)':
+  '@hono/node-server@2.1.5(hono@4.13.13)':
     dependencies:
       hono: 4.13.13
 
