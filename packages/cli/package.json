@@ -23,7 +23,7 @@
     "@omnimesh/router": "workspace:*",
     "commander": "^13.1.0",
     "esbuild": "^0.28.2",
-    "hono": "^4.7.2",
+    "hono": "^4.13.14",
     "libsodium-wrappers": "0.7.15",
     "picocolors": "^1.1.1",
     "tsx": "^4.23.15",
